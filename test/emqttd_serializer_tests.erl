@@ -20,11 +20,11 @@
 %%% SOFTWARE.
 %%%-----------------------------------------------------------------------------
 %%% @doc
-%%% emqttd_serialiser tests.
+%%% emqttd_serializer tests.
 %%%
 %%% @end
 %%%-----------------------------------------------------------------------------
--module(emqttd_serialiser_tests).
+-module(emqttd_serializer_tests).
 
 -ifdef(TEST).
 
@@ -32,47 +32,47 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--import(emqttd_serialiser, [serialise/1]).
+-import(emqttd_serializer, [serialize/1]).
 
-serialise_connect_test() ->
-    serialise(?CONNECT_PACKET(#mqtt_packet_connect{})).
+serialize_connect_test() ->
+    serialize(?CONNECT_PACKET(#mqtt_packet_connect{})).
 
-serialise_connack_test() ->
+serialize_connack_test() ->
     ConnAck = #mqtt_packet{header = #mqtt_packet_header{type = ?CONNACK}, 
                            variable = #mqtt_packet_connack{ack_flags = 0, return_code = 0}},
-    ?assertEqual(<<32,2,0,0>>, serialise(ConnAck)).
+    ?assertEqual(<<32,2,0,0>>, serialize(ConnAck)).
 
-serialise_publish_test() ->
-    serialise(?PUBLISH_PACKET(?QOS_0, <<"Topic">>, undefined, <<"Payload">>)),
-    serialise(?PUBLISH_PACKET(?QOS_1, <<"Topic">>, 938, <<"Payload">>)).
+serialize_publish_test() ->
+    serialize(?PUBLISH_PACKET(?QOS_0, <<"Topic">>, undefined, <<"Payload">>)),
+    serialize(?PUBLISH_PACKET(?QOS_1, <<"Topic">>, 938, <<"Payload">>)).
 
-serialise_puback_test() ->
-    serialise(?PUBACK_PACKET(?PUBACK, 10384)).
+serialize_puback_test() ->
+    serialize(?PUBACK_PACKET(?PUBACK, 10384)).
 
-serialise_pubrel_test() ->
-    serialise(?PUBREL_PACKET(10384)).
+serialize_pubrel_test() ->
+    serialize(?PUBREL_PACKET(10384)).
 
-serialise_subscribe_test() ->
+serialize_subscribe_test() ->
     TopicTable = [{<<"TopicQos0">>, ?QOS_0}, {<<"TopicQos1">>, ?QOS_1}, {<<"TopicQos2">>, ?QOS_2}],
-    serialise(?SUBSCRIBE_PACKET(10, TopicTable)).
+    serialize(?SUBSCRIBE_PACKET(10, TopicTable)).
 
-serialise_suback_test() ->
-    serialise(?SUBACK_PACKET(10, [?QOS_0, ?QOS_1, 128])).
+serialize_suback_test() ->
+    serialize(?SUBACK_PACKET(10, [?QOS_0, ?QOS_1, 128])).
 
-serialise_unsubscribe_test() ->
-    serialise(?UNSUBSCRIBE_PACKET(10, [<<"Topic1">>, <<"Topic2">>])).
+serialize_unsubscribe_test() ->
+    serialize(?UNSUBSCRIBE_PACKET(10, [<<"Topic1">>, <<"Topic2">>])).
 
-serialise_unsuback_test() ->
-    serialise(?UNSUBACK_PACKET(10)).
+serialize_unsuback_test() ->
+    serialize(?UNSUBACK_PACKET(10)).
 
-serialise_pingreq_test() ->
-    serialise(?PACKET(?PINGREQ)).
+serialize_pingreq_test() ->
+    serialize(?PACKET(?PINGREQ)).
 
-serialise_pingresp_test() ->
-    serialise(?PACKET(?PINGRESP)).
+serialize_pingresp_test() ->
+    serialize(?PACKET(?PINGRESP)).
 
-serialise_disconnect_test() ->
-    serialise(?PACKET(?DISCONNECT)).
+serialize_disconnect_test() ->
+    serialize(?PACKET(?DISCONNECT)).
 
 -endif.
 

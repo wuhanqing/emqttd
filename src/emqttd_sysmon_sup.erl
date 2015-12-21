@@ -19,46 +19,26 @@
 %%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 %%% SOFTWARE.
 %%%-----------------------------------------------------------------------------
-%%% @doc
-%%% emqttd auto subscribe module.
+%%% @doc emqttd sysmon supervisor.
 %%%
-%%% @end
+%%% @author Feng Lee <feng@emqtt.io>
 %%%-----------------------------------------------------------------------------
--module(emqttd_mod_autosub).
+-module(emqttd_sysmon_sup).
 
--author("Feng Lee <feng@emqtt.io>").
+-behaviour(supervisor).
 
--include("emqttd.hrl").
+%% API
+-export([start_link/0]).
 
--include("emqttd_protocol.hrl").
+%% Supervisor callbacks
+-export([init/1]).
 
--behaviour(emqttd_gen_mod).
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
--export([load/1, client_connected/3, unload/1]).
-
--record(state, {topics}).
-
-load(Opts) ->
-    Topics = [{list_to_binary(Topic), Qos} || {Topic, Qos} <- Opts, 0 =< Qos, Qos =< 2],
-    emqttd_broker:hook('client.connected', {?MODULE, client_connected},
-                       {?MODULE, client_connected, [Topics]}),
-    {ok, #state{topics = Topics}}.
-
-client_connected(?CONNACK_ACCEPT, #mqtt_client{client_id = ClientId,
-                                               client_pid = ClientPid,
-                                               username = Username}, Topics) ->
-    F = fun(Topic) ->
-            Topic1 = emqttd_topic:feed_var(<<"$c">>, ClientId, Topic),
-            if
-                Username =:= undefined -> Topic1;
-                true -> emqttd_topic:feed_var(<<"$u">>, Username, Topic1)
-            end
-    end,
-    emqttd_client:subscribe(ClientPid, [{F(Topic), Qos} || {Topic, Qos} <- Topics]);
-
-client_connected(_ConnAck, _Client, _Topics) ->
-    ignore.
-
-unload(_Opts) ->
-    emqttd_broker:unhook('client.connected', {?MODULE, client_connected}).
+init([]) ->
+    Env = emqttd:env(sysmon),
+    {ok, {{one_for_one, 10, 100},
+          [{sysmon, {emqttd_sysmon, start_link, [Env]},
+             permanent, 5000, worker, [emqttd_sysmon]}]}}.
 

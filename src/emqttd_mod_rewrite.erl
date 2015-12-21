@@ -19,18 +19,15 @@
 %%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 %%% SOFTWARE.
 %%%-----------------------------------------------------------------------------
-%%% @doc
-%%% emqttd rewrite module.
+%%% @doc emqttd rewrite module
 %%%
-%%% @end
+%%% @author Feng Lee <feng@emqtt.io>
 %%%-----------------------------------------------------------------------------
 -module(emqttd_mod_rewrite).
 
--author("Feng Lee <feng@emqtt.io>").
+-behaviour(emqttd_gen_mod).
 
 -include("emqttd.hrl").
-
--behaviour(emqttd_gen_mod).
 
 -export([load/1, reload/1, unload/1]).
 
@@ -49,7 +46,8 @@ load(Opts) ->
     emqttd_broker:hook('client.unsubscribe', {?MODULE, rewrite_unsubscribe},
                         {?MODULE, rewrite, [unsubscribe, Sections]}),
     emqttd_broker:hook('message.publish', {?MODULE, rewrite_publish},
-                        {?MODULE, rewrite, [publish, Sections]}).
+                        {?MODULE, rewrite, [publish, Sections]}),
+    {ok,  Sections}.
 
 rewrite(_ClientId, TopicTable, subscribe, Sections) ->
     lager:info("rewrite subscribe: ~p", [TopicTable]),

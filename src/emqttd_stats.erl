@@ -19,14 +19,11 @@
 %%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 %%% SOFTWARE.
 %%%-----------------------------------------------------------------------------
-%%% @doc
-%%% emqttd statistics.
+%%% @doc emqttd statistics
 %%%
-%%% @end
+%%% @author Feng Lee <feng@emqtt.io>
 %%%-----------------------------------------------------------------------------
 -module(emqttd_stats).
-
--author("Feng Lee <feng@emqtt.io>").
 
 -include("emqttd.hrl").
 
@@ -34,7 +31,7 @@
 
 -define(SERVER, ?MODULE).
 
--export([start_link/0]).
+-export([start_link/0, stop/0]).
 
 %% statistics API.
 -export([statsfun/1, statsfun/2,
@@ -63,10 +60,12 @@
 
 %% $SYS Topics for Subscribers
 -define(SYSTOP_PUBSUB, [
+    'routes/count',      % ...
+    'routes/reverse',    % ...
     'topics/count',      % ...
     'topics/max',        % ...
-    'subscribers/count', % ...
-    'subscribers/max',   % ...
+    'subscriptions/count', % ...
+    'subscriptions/max',   % ...
     'queues/count',      % ...
     'queues/max'         % ...
 ]).
@@ -88,6 +87,9 @@
 -spec start_link() -> {ok, pid()} | ignore | {error, term()}.
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+stop() ->
+    gen_server:call(?SERVER, stop).
 
 %%------------------------------------------------------------------------------
 %% @doc Generate stats fun
@@ -141,14 +143,17 @@ setstats(Stat, MaxStat, Val) ->
 %%%=============================================================================
 
 init([]) ->
-    random:seed(now()),
+    random:seed(os:timestamp()),
     ets:new(?STATS_TAB, [set, public, named_table, {write_concurrency, true}]),
     Topics = ?SYSTOP_CLIENTS ++ ?SYSTOP_SESSIONS ++ ?SYSTOP_PUBSUB ++ ?SYSTOP_RETAINED,
     ets:insert(?STATS_TAB, [{Topic, 0} || Topic <- Topics]),
     % Create $SYS Topics
-    [ok = emqttd_pubsub:create(stats_topic(Topic)) || Topic <- Topics],
+    [ok = emqttd_pubsub:create(topic, stats_topic(Topic)) || Topic <- Topics],
     % Tick to publish stats
     {ok, #state{tick_tref = emqttd_broker:start_tick(tick)}, hibernate}.
+
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State};
 
 handle_call(_Request, _From, State) ->
     {reply, error, State}.
