@@ -122,13 +122,15 @@ npid() ->
                  bxor NodeD20)
                 bxor PidCR1,
 
+    NodeByte = NodeByte1 bxor NodeByte2,
+
     % reduce the Erlang pid to 32 bits
     PidByte1 = PidID1 bxor PidSR4,
     PidByte2 = PidID2 bxor PidSR3,
     PidByte3 = PidID3 bxor PidSR2,
     PidByte4 = PidID4 bxor PidSR1,
 
-    <<NPid:48>> = <<NodeByte1:8, NodeByte2:8,
+    <<NPid:48>> = <<NodeByte:16,
                     PidByte1:8, PidByte2:8,
                     PidByte3:8, PidByte4:8>>,
     NPid.
