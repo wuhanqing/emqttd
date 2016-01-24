@@ -5,11 +5,9 @@ emqttd is a massively scalable and clusterable MQTT V3.1/V3.1.1 broker written i
 
 emqttd requires Erlang R17+ to build.
 
-**DON'T compile the broker with Erlang/OTP R18.0 which introduced a [binary memory leak](http://erlang.org/pipermail/erlang-questions/2015-September/086098.html).**
-
 Demo Server: tcp://t.emqtt.io:1883
 
-Twitter: [@emqtt](https://twitter.com/emqtt)
+Follow us on Twitter: [@emqtt](https://twitter.com/emqtt)
 
 ## Goals
 
@@ -56,7 +54,8 @@ emqttd is aimed to provide a solid, enterprise grade, extensible open-source MQT
 * [emqttd_plugin_mysql](https://github.com/emqtt/emqttd_plugin_mysql) - Authentication with MySQL
 * [emqttd_plugin_pgsql](https://github.com/emqtt/emqttd_plugin_pgsql) - Authentication with PostgreSQL
 * [emqttd_plugin_kafka](https://github.com/emqtt/emqtt_kafka) - Publish MQTT Messages to Kafka
-* [emqttd_plugin_redis](https://github.com/emqtt/emqtt_redis) - Redis Plugin
+* [emqttd_plugin_redis](https://github.com/emqtt/emqttd_plugin_redis) - Redis Plugin
+* [emqttd_plugin_mongo](https://github.com/emqtt/emqttd_plugin_mongo) - MongoDB Plugin
 * [emqttd_stomp](https://github.com/emqtt/emqttd_stomp) - Stomp Protocol Plugin
 * [emqttd_sockjs](https://github.com/emqtt/emqttd_sockjs) - SockJS(Stomp) Plugin
 * [emqttd_recon](https://github.com/emqtt/emqttd_recon) - Recon Plugin
