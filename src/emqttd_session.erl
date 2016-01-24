@@ -487,6 +487,11 @@ handle_cast({pubcomp, PktId}, Session = #session{awaiting_comp = AwaitingComp}) 
 handle_cast(Msg, State) ->
     ?UNEXPECTED_MSG(Msg, State).
 
+%% Drop the messages sent by self
+handle_info({dispatch, _Topic, #mqtt_message{from = ClientId}},
+            Session = #session{client_id = ClientId}) ->
+    hibernate(Session);
+
 %% Dispatch Message
 handle_info({dispatch, Topic, Msg}, Session = #session{subscriptions = Subscriptions})
     when is_record(Msg, mqtt_message) ->
