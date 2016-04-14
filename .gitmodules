@@ -22,3 +22,6 @@
 [submodule "plugins/emqttd_plugin_redis"]
 	path = plugins/emqttd_plugin_redis
 	url = https://github.com/emqtt/emqttd_plugin_redis.git
+[submodule "plugins/emqttd_plugin_mongo"]
+	path = plugins/emqttd_plugin_mongo
+	url = https://github.com/emqtt/emqttd_plugin_mongo.git
