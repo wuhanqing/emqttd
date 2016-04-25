@@ -22,3 +22,6 @@
 [submodule "plugins/emqttd_plugin_redis"]
 	path = plugins/emqttd_plugin_redis
 	url = https://github.com/emqtt/emqttd_plugin_redis.git
+[submodule "plugins/emqchat"]
+	path = plugins/emqchat
+	url = https://github.com/erylee/emqchat.git

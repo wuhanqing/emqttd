@@ -56,6 +56,9 @@
 -export([publish/2, puback/2, pubrec/2, pubrel/2, pubcomp/2,
          subscribe/2, subscribe/3, unsubscribe/2]).
 
+%% Chat
+-export([set/3]).
+
 %% gen_server Function Exports
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -76,6 +79,9 @@
 
         %% Old Client Pid that has been kickout
         old_client_pid :: pid(),
+
+        %% Username
+        username       :: binary() | undefined,
 
         %% Last packet id of the session
         packet_id = 1,
@@ -211,6 +217,11 @@ unsubscribe(SessPid, Topics) ->
 %% gen_server callbacks
 %%--------------------------------------------------------------------
 
+%% @doc Set attribute
+-spec set(pid(), atom(), binary() | undefined) -> ok.
+set(SessPid, Attr, Val) ->
+    gen_server2:cast(SessPid, {set, Attr, Val}).
+
 init([CleanSess, ClientId, ClientPid]) ->
     process_flag(trap_exit, true),
     true    = link(ClientPid),
@@ -235,7 +246,7 @@ init([CleanSess, ClientId, ClientPid]) ->
             timestamp         = os:timestamp()},
     emqttd_sm:register_session(CleanSess, ClientId, sess_info(Session)),
     %% Run hooks
-    emqttd_broker:foreach_hooks('session.created', [ClientId, ClientPid]),
+    emqttd:run_hooks('session.created', [ClientId, ClientPid], []),
     %% Start collector
     {ok, start_collector(Session), hibernate}.
 
@@ -247,6 +258,7 @@ prioritise_call(Msg, _From, _Len, _State) ->
 
 prioritise_cast(Msg, _Len, _State) ->
     case Msg of
+        {set, _, _}         -> 10;
         {destroy, _}        -> 10;
         {resume, _, _}      -> 9;
         {pubrel,  _PktId}   -> 8;
@@ -287,7 +299,15 @@ handle_call({publish, Msg = #mqtt_message{qos = ?QOS_2, pktid = PktId}},
 handle_call(Req, _From, State) ->
     ?UNEXPECTED_REQ(Req, State).
 
-handle_cast({subscribe, TopicTable0, AckFun}, Session = #session{client_id     = ClientId,
+handle_cast({set, username, Username}, Session) ->
+    hibernate(Session#session{username = Username});
+
+%%TODO: ignore now...
+handle_cast({set, _Attr, _Val}, Session) ->
+    hibernate(Session);
+
+handle_cast({subscribe, TopicTable0, AckFun}, Session = #session{client_id = ClientId,
+                                                                 username  = Username,
                                                                  subscriptions = Subscriptions}) ->
 
     case emqttd:run_hooks('client.subscribe', [ClientId], TopicTable0) of
@@ -404,7 +424,7 @@ handle_cast({resume, ClientId, ClientPid}, Session = #session{client_id      = C
     Session3 = dequeue(Session2),
 
     %% Resume Hooks
-    emqttd_broker:foreach_hooks('session.resumed', [ClientId, ClientPid]),
+    emqttd:run_hooks('session.resumed', [ClientId, ClientPid], []),
 
     hibernate(Session3);
 
@@ -546,7 +566,7 @@ handle_info(Info, Session) ->
 
 terminate(Reason, #session{clean_sess = CleanSess, client_id = ClientId}) ->
     %% Hooks
-    emqttd_broker:foreach_hooks('session.terminated', [ClientId, Reason]),
+    emqttd:run_hooks('session.terminated', [ClientId, Reason], []),
     emqttd_sm:unregister_session(CleanSess, ClientId).
 
 code_change(_OldVsn, Session, _Extra) ->
@@ -674,11 +694,12 @@ await(#mqtt_message{pktid = PktId}, Session = #session{awaiting_ack   = Awaiting
     Session#session{awaiting_ack = Awaiting1}.
 
 acked(PktId, Session = #session{client_id      = ClientId,
+                                username       = Username,
                                 inflight_queue = InflightQ,
                                 awaiting_ack   = Awaiting}) ->
     case lists:keyfind(PktId, 1, InflightQ) of
         {_, Msg} ->
-            emqttd:run_hooks('message.acked', [ClientId], Msg);
+            emqttd:run_hooks('message.acked', [ClientId, Username], Msg);
         false ->
             ?LOG(error, "Cannot find acked pktid: ~p", [PktId], Session)
     end,

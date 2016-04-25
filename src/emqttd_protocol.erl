@@ -150,6 +150,8 @@ process(Packet = ?CONNECT_PACKET(Var), State0) ->
                         {ok, Session, SP} ->
                             %% Register the client
                             emqttd_cm:register(client(State2)),
+                            %% Username for chat application
+                            emqttd_session:set(Session, username, Username),
                             %% Start keepalive
                             start_keepalive(KeepAlive),
                             %% ACCEPT
