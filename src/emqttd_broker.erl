@@ -1,28 +1,19 @@
-%%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
-%%%
-%%% Permission is hereby granted, free of charge, to any person obtaining a copy
-%%% of this software and associated documentation files (the "Software"), to deal
-%%% in the Software without restriction, including without limitation the rights
-%%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-%%% copies of the Software, and to permit persons to whom the Software is
-%%% furnished to do so, subject to the following conditions:
-%%%
-%%% The above copyright notice and this permission notice shall be included in all
-%%% copies or substantial portions of the Software.
-%%%
-%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-%%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-%%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-%%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-%%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-%%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-%%% SOFTWARE.
-%%%-----------------------------------------------------------------------------
-%%% @doc emqttd broker
-%%%
-%%% @author Feng Lee <feng@emqtt.io>
-%%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Copyright (c) 2012-2016 Feng Lee <feng@emqtt.io>.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%--------------------------------------------------------------------
+
 -module(emqttd_broker).
 
 -behaviour(gen_server).
@@ -34,14 +25,8 @@
 %% API Function Exports
 -export([start_link/0]).
 
-%% Running nodes
--export([running_nodes/0]).
-
 %% Event API
 -export([subscribe/1, notify/2]).
-
-%% Hook API
--export([hook/3, unhook/2, foreach_hooks/2, foldl_hooks/3]).
 
 %% Broker API
 -export([env/1, version/0, uptime/0, datetime/0, sysdescr/0]).
@@ -67,135 +52,52 @@
     sysdescr      % Broker description
 ]).
 
-%%%=============================================================================
-%%% API
-%%%=============================================================================
+%%--------------------------------------------------------------------
+%% API
+%%--------------------------------------------------------------------
 
-%%------------------------------------------------------------------------------
 %% @doc Start emqttd broker
-%% @end
-%%------------------------------------------------------------------------------
--spec start_link() -> {ok, pid()} | ignore | {error, any()}.
+-spec(start_link() -> {ok, pid()} | ignore | {error, any()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-%%------------------------------------------------------------------------------
-%% @doc Get running nodes
-%% @end
-%%------------------------------------------------------------------------------
--spec running_nodes() -> list(node()).
-running_nodes() ->
-    mnesia:system_info(running_db_nodes).
-
-%%------------------------------------------------------------------------------
 %% @doc Subscribe broker event
-%% @end
-%%------------------------------------------------------------------------------
--spec subscribe(EventType :: any()) -> ok.
+-spec(subscribe(EventType :: any()) -> ok).
 subscribe(EventType) ->
     gproc:reg({p, l, {broker, EventType}}).
     
-%%------------------------------------------------------------------------------
 %% @doc Notify broker event
-%% @end
-%%------------------------------------------------------------------------------
--spec notify(EventType :: any(), Event :: any()) -> ok.
+-spec(notify(EventType :: any(), Event :: any()) -> ok).
 notify(EventType, Event) ->
-     Key = {broker, EventType},
-     gproc:send({p, l, Key}, {self(), Key, Event}).
+     gproc:send({p, l, {broker, EventType}}, {notify, EventType, self(), Event}).
 
-%%------------------------------------------------------------------------------
 %% @doc Get broker env
-%% @end
-%%------------------------------------------------------------------------------
 env(Name) ->
     proplists:get_value(Name, emqttd:env(broker)).
 
-%%------------------------------------------------------------------------------
 %% @doc Get broker version
-%% @end
-%%------------------------------------------------------------------------------
--spec version() -> string().
+-spec(version() -> string()).
 version() ->
     {ok, Version} = application:get_key(emqttd, vsn), Version.
 
-%%------------------------------------------------------------------------------
 %% @doc Get broker description
-%% @end
-%%------------------------------------------------------------------------------
--spec sysdescr() -> string().
+-spec(sysdescr() -> string()).
 sysdescr() ->
     {ok, Descr} = application:get_key(emqttd, description), Descr.
 
-%%------------------------------------------------------------------------------
 %% @doc Get broker uptime
-%% @end
-%%------------------------------------------------------------------------------
--spec uptime() -> string().
-uptime() ->
-    gen_server:call(?SERVER, uptime).
+-spec(uptime() -> string()).
+uptime() -> gen_server:call(?SERVER, uptime).
 
-%%------------------------------------------------------------------------------
 %% @doc Get broker datetime
-%% @end
-%%------------------------------------------------------------------------------
--spec datetime() -> string().
+-spec(datetime() -> string()).
 datetime() ->
     {{Y, M, D}, {H, MM, S}} = calendar:local_time(),
     lists:flatten(
         io_lib:format(
             "~4..0w-~2..0w-~2..0w ~2..0w:~2..0w:~2..0w", [Y, M, D, H, MM, S])).
 
-%%------------------------------------------------------------------------------
-%% @doc Hook
-%% @end
-%%------------------------------------------------------------------------------
--spec hook(Hook :: atom(), Name :: any(), MFA :: mfa()) -> ok | {error, any()}.
-hook(Hook, Name, MFA) ->
-    gen_server:call(?SERVER, {hook, Hook, Name, MFA}).
-
-%%------------------------------------------------------------------------------
-%% @doc Unhook
-%% @end
-%%------------------------------------------------------------------------------
--spec unhook(Hook :: atom(), Name :: any()) -> ok | {error, any()}.
-unhook(Hook, Name) ->
-    gen_server:call(?SERVER, {unhook, Hook, Name}).
-
-%%------------------------------------------------------------------------------
-%% @doc Foreach hooks
-%% @end
-%%------------------------------------------------------------------------------
--spec foreach_hooks(Hook :: atom(), Args :: list()) -> any().
-foreach_hooks(Hook, Args) ->
-    case ets:lookup(?BROKER_TAB, {hook, Hook}) of
-        [{_, Hooks}] ->
-            lists:foreach(fun({_Name, {M, F, A}}) ->
-                    apply(M, F, Args++A)
-                end, Hooks);
-        [] ->
-            ok
-    end.
-
-%%------------------------------------------------------------------------------
-%% @doc Foldl hooks
-%% @end
-%%------------------------------------------------------------------------------
--spec foldl_hooks(Hook :: atom(), Args :: list(), Acc0 :: any()) -> any().
-foldl_hooks(Hook, Args, Acc0) ->
-    case ets:lookup(?BROKER_TAB, {hook, Hook}) of
-        [{_, Hooks}] -> 
-            lists:foldl(fun({_Name, {M, F, A}}, Acc) -> 
-                    apply(M, F, lists:append([Args, [Acc], A]))
-                end, Acc0, Hooks);
-        [] -> 
-            Acc0
-    end.
-
-%%------------------------------------------------------------------------------
 %% @doc Start a tick timer
-%% @end
-%%------------------------------------------------------------------------------
 start_tick(Msg) ->
     start_tick(timer:seconds(env(sys_interval)), Msg).
 
@@ -204,24 +106,21 @@ start_tick(0, _Msg) ->
 start_tick(Interval, Msg) when Interval > 0 ->
     {ok, TRef} = timer:send_interval(Interval, Msg), TRef.
 
-%%------------------------------------------------------------------------------
 %% @doc Start tick timer
-%% @end
-%%------------------------------------------------------------------------------
 stop_tick(undefined) ->
     ok;
 stop_tick(TRef) ->
     timer:cancel(TRef).
 
-%%%=============================================================================
-%%% gen_server callbacks
-%%%=============================================================================
+%%--------------------------------------------------------------------
+%% gen_server callbacks
+%%--------------------------------------------------------------------
 
 init([]) ->
-    emqttd:seed_now(),
+    emqttd_time:seed(),
     ets:new(?BROKER_TAB, [set, public, named_table]),
     % Create $SYS Topics
-    emqttd_pubsub:create(topic, <<"$SYS/brokers">>),
+    emqttd:create(topic, <<"$SYS/brokers">>),
     [ok = create_topic(Topic) || Topic <- ?SYSTOP_BROKERS],
     % Tick
     {ok, #state{started_at = os:timestamp(),
@@ -230,31 +129,6 @@ init([]) ->
 
 handle_call(uptime, _From, State) ->
     {reply, uptime(State), State};
-
-handle_call({hook, Hook, Name, MFArgs}, _From, State) ->
-    Key = {hook, Hook}, Reply =
-    case ets:lookup(?BROKER_TAB, Key) of
-        [{Key, Hooks}] -> 
-            case lists:keyfind(Name, 1, Hooks) of
-                {Name, _MFArgs} ->
-                    {error, existed};
-                false ->
-                    ets:insert(?BROKER_TAB, {Key, Hooks ++ [{Name, MFArgs}]})
-            end;
-        [] -> 
-            ets:insert(?BROKER_TAB, {Key, [{Name, MFArgs}]})
-    end,
-    {reply, Reply, State};
-
-handle_call({unhook, Hook, Name}, _From, State) ->
-    Key = {hook, Hook}, Reply =
-    case ets:lookup(?BROKER_TAB, Key) of
-        [{Key, Hooks}] -> 
-            ets:insert(?BROKER_TAB, {Key, lists:keydelete(Name, 1, Hooks)}); 
-        [] -> 
-            {error, not_found}
-    end,
-    {reply, Reply, State};
 
 handle_call(Req, _From, State) ->
     ?UNEXPECTED_REQ(Req, State).
@@ -265,7 +139,7 @@ handle_cast(Msg, State) ->
 handle_info(heartbeat, State) ->
     publish(uptime, list_to_binary(uptime(State))),
     publish(datetime, list_to_binary(datetime())),
-    {noreply, State};
+    {noreply, State, hibernate};
 
 handle_info(tick, State) ->
     retain(brokers),
@@ -284,25 +158,28 @@ terminate(_Reason, #state{heartbeat = Hb, tick_tref = TRef}) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%%%=============================================================================
-%%% Internal functions
-%%%=============================================================================
+%%--------------------------------------------------------------------
+%% Internal functions
+%%--------------------------------------------------------------------
 
 create_topic(Topic) ->
-    emqttd_pubsub:create(topic, emqttd_topic:systop(Topic)).
+    emqttd:create(topic, emqttd_topic:systop(Topic)).
 
 retain(brokers) ->
-    Payload = list_to_binary(string:join([atom_to_list(N) || N <- running_nodes()], ",")),
+    Payload = list_to_binary(string:join([atom_to_list(N) ||
+                    N <- emqttd_mnesia:running_nodes()], ",")),
     Msg = emqttd_message:make(broker, <<"$SYS/brokers">>, Payload),
-    emqttd_pubsub:publish(emqttd_message:set_flag(sys, Msg)).
+    Msg1 = emqttd_message:set_flag(sys, emqttd_message:set_flag(retain, Msg)),
+    emqttd:publish(Msg1).
 
 retain(Topic, Payload) when is_binary(Payload) ->
     Msg = emqttd_message:make(broker, emqttd_topic:systop(Topic), Payload),
-    emqttd_pubsub:publish(emqttd_message:set_flag(retain, Msg)).
+    Msg1 = emqttd_message:set_flag(sys, emqttd_message:set_flag(retain, Msg)),
+    emqttd:publish(Msg1).
 
 publish(Topic, Payload) when is_binary(Payload) ->
     Msg = emqttd_message:make(broker, emqttd_topic:systop(Topic), Payload),
-    emqttd_pubsub:publish(Msg).
+    emqttd:publish(emqttd_message:set_flag(sys, Msg)).
 
 uptime(#state{started_at = Ts}) ->
     Secs = timer:now_diff(os:timestamp(), Ts) div 1000000,

@@ -1,28 +1,20 @@
-%%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
-%%%
-%%% Permission is hereby granted, free of charge, to any person obtaining a copy
-%%% of this software and associated documentation files (the "Software"), to deal
-%%% in the Software without restriction, including without limitation the rights
-%%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-%%% copies of the Software, and to permit persons to whom the Software is
-%%% furnished to do so, subject to the following conditions:
-%%%
-%%% The above copyright notice and this permission notice shall be included in all
-%%% copies or substantial portions of the Software.
-%%%
-%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-%%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-%%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-%%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-%%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-%%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-%%% SOFTWARE.
-%%%-----------------------------------------------------------------------------
-%%% @doc MQTT Packet Parser
-%%%
-%%% @author Feng Lee <feng@emqtt.io>
-%%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Copyright (c) 2012-2016 Feng Lee <feng@emqtt.io>.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%--------------------------------------------------------------------
+
+%% @doc MQTT Packet Parser
 -module(emqttd_parser).
 
 -include("emqttd.hrl").
@@ -38,11 +30,8 @@
 
 -type parser() :: fun( (binary()) -> any() ).
 
-%%------------------------------------------------------------------------------
 %% @doc Initialize a parser
-%% @end
-%%------------------------------------------------------------------------------
--spec new(Opts :: [option()]) -> parser().
+-spec(new(Opts :: [option()]) -> parser()).
 new(Opts) ->
     fun(Bin) -> parse(Bin, {none, limit(Opts)}) end.
 
@@ -50,11 +39,9 @@ limit(Opts) ->
     #mqtt_packet_limit{max_packet_size = 
                         proplists:get_value(max_packet_size, Opts, ?MAX_LEN)}.
 
-%%------------------------------------------------------------------------------
 %% @doc Parse MQTT Packet
-%% @end
-%%------------------------------------------------------------------------------
--spec parse(binary(), {none, [option()]} | fun()) -> {ok, mqtt_packet()} | {error, any()} | {more, fun()}.
+-spec(parse(binary(), {none, [option()]} | fun())
+            -> {ok, mqtt_packet()} | {error, any()} | {more, fun()}).
 parse(<<>>, {none, Limit}) ->
     {more, fun(Bin) -> parse(Bin, {none, Limit}) end};
 parse(<<PacketType:4, Dup:1, QoS:2, Retain:1, Rest/binary>>, {none, Limit}) ->
@@ -74,6 +61,12 @@ parse_remaining_len(_Bin, _Header, _Multiplier, Length, #mqtt_packet_limit{max_p
     {error, invalid_mqtt_frame_len};
 parse_remaining_len(<<>>, Header, Multiplier, Length, Limit) ->
     {more, fun(Bin) -> parse_remaining_len(Bin, Header, Multiplier, Length, Limit) end};
+%% optimize: match PUBACK, PUBREC, PUBREL, PUBCOMP, UNSUBACK...
+parse_remaining_len(<<0:1, 2:7, Rest/binary>>, Header, 1, 0, _Limit) ->
+    parse_frame(Rest, Header, 2);
+%% optimize: match PINGREQ...
+parse_remaining_len(<<0:8, Rest/binary>>, Header, 1, 0, _Limit) ->
+    parse_frame(Rest, Header, 0);
 parse_remaining_len(<<1:1, Len:7, Rest/binary>>, Header, Multiplier, Value, Limit) ->
     parse_remaining_len(Rest, Header, Multiplier * ?HIGHBIT, Value + Len * Multiplier, Limit);
 parse_remaining_len(<<0:1, Len:7, Rest/binary>>, Header,  Multiplier, Value, #mqtt_packet_limit{max_packet_size = MaxLen}) ->
@@ -87,7 +80,8 @@ parse_frame(Bin, #mqtt_packet_header{type = Type, qos  = Qos} = Header, Length) 
     case {Type, Bin} of
         {?CONNECT, <<FrameBin:Length/binary, Rest/binary>>} ->
             {ProtoName, Rest1} = parse_utf(FrameBin),
-            <<ProtoVersion : 8, Rest2/binary>> = Rest1,
+            %% Fix mosquitto bridge: 0x83, 0x84
+            <<_Bridge:4, ProtoVersion:4, Rest2/binary>> = Rest1,
             <<UsernameFlag : 1,
               PasswordFlag : 1,
               WillRetain   : 1,

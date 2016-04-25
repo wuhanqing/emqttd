@@ -1,39 +1,26 @@
-%%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
-%%%
-%%% Permission is hereby granted, free of charge, to any person obtaining a copy
-%%% of this software and associated documentation files (the "Software"), to deal
-%%% in the Software without restriction, including without limitation the rights
-%%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-%%% copies of the Software, and to permit persons to whom the Software is
-%%% furnished to do so, subject to the following conditions:
-%%%
-%%% The above copyright notice and this permission notice shall be included in all
-%%% copies or substantial portions of the Software.
-%%%
-%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-%%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-%%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-%%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-%%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-%%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-%%% SOFTWARE.
-%%%-----------------------------------------------------------------------------
-%%% @doc MQTT Topic Functions
-%%%
-%%% @author Feng Lee <feng@emqtt.io>
-%%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Copyright (c) 2012-2016 Feng Lee <feng@emqtt.io>.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%--------------------------------------------------------------------
+
 -module(emqttd_topic).
 
--import(lists, [reverse/1]).
- 
 -export([match/2, validate/1, triples/1, words/1, wildcard/1]).
 
 -export([join/1, feed_var/3, is_queue/1, systop/1]).
 
 -type topic() :: binary().
-
-%-type type()   :: static | dynamic.
 
 -type word()   :: '' | '+' | '#' | binary().
 
@@ -45,11 +32,8 @@
 
 -define(MAX_TOPIC_LEN, 4096).
 
-%%%-----------------------------------------------------------------------------
 %% @doc Is wildcard topic?
-%% @end
-%%%-----------------------------------------------------------------------------
--spec wildcard(topic()) -> true | false.
+-spec(wildcard(topic() | words()) -> true | false).
 wildcard(Topic) when is_binary(Topic) ->
     wildcard(words(Topic));
 wildcard([]) -> 
@@ -61,13 +45,10 @@ wildcard(['+'|_]) ->
 wildcard([_H|T]) ->
     wildcard(T).
 
-%%------------------------------------------------------------------------------
 %% @doc Match Topic name with filter
-%% @end
-%%------------------------------------------------------------------------------
--spec match(Name, Filter) -> boolean() when
-    Name    :: topic() | words(),
-    Filter  :: topic() | words().
+-spec(match(Name, Filter) -> boolean() when
+      Name    :: topic() | words(),
+      Filter  :: topic() | words()).
 match(Name, Filter) when is_binary(Name) and is_binary(Filter) ->
     match(words(Name), words(Filter));
 match([], []) ->
@@ -89,11 +70,8 @@ match([_H1|_], []) ->
 match([], [_H|_T2]) ->
     false.
 
-%%------------------------------------------------------------------------------
 %% @doc Validate Topic
-%% @end
-%%------------------------------------------------------------------------------
--spec validate({name | filter, topic()}) -> boolean().
+-spec(validate({name | filter, topic()}) -> boolean()).
 validate({_, <<>>}) ->
     false;
 validate({_, Topic}) when is_binary(Topic) and (size(Topic) > ?MAX_TOPIC_LEN) ->
@@ -127,16 +105,13 @@ validate3(<<C/utf8, _Rest/binary>>) when C == $#; C == $+; C == 0 ->
 validate3(<<_/utf8, Rest/binary>>) ->
     validate3(Rest).
 
-%%%-----------------------------------------------------------------------------
 %% @doc Topic to Triples
-%% @end
-%%%-----------------------------------------------------------------------------
--spec triples(topic()) -> list(triple()).
+-spec(triples(topic()) -> list(triple())).
 triples(Topic) when is_binary(Topic) ->
     triples(words(Topic), root, []).
 
 triples([], _Parent, Acc) ->
-    reverse(Acc);
+    lists:reverse(Acc);
 
 triples([W|Words], Parent, Acc) ->
     Node = join(Parent, W),
@@ -152,11 +127,8 @@ bin('+') -> <<"+">>;
 bin('#') -> <<"#">>;
 bin(B) when is_binary(B) -> B.
 
-%%------------------------------------------------------------------------------
 %% @doc Split Topic Path to Words
-%% @end
-%%------------------------------------------------------------------------------
--spec words(topic()) -> words().
+-spec(words(topic()) -> words()).
 words(Topic) when is_binary(Topic) ->
     [word(W) || W <- binary:split(Topic, <<"/">>, [global])].
 
@@ -165,28 +137,21 @@ word(<<"+">>) -> '+';
 word(<<"#">>) -> '#';
 word(Bin)     -> Bin.
 
-%%------------------------------------------------------------------------------
-%% @doc Queue is a special topic name that starts with "$Q/"
-%% @end
-%%------------------------------------------------------------------------------
--spec is_queue(topic()) -> boolean().
-is_queue(<<"$Q/", _Queue/binary>>) ->
+%% @doc Queue is a special topic name that starts with "$queue/"
+-spec(is_queue(topic()) -> boolean()).
+is_queue(<<"$queue/", _Queue/binary>>) ->
     true;
 is_queue(_) ->
     false.
 
-%%------------------------------------------------------------------------------
 %% @doc '$SYS' Topic.
-%% @end
-%%------------------------------------------------------------------------------
-
 systop(Name) when is_atom(Name) ->
     list_to_binary(lists:concat(["$SYS/brokers/", node(), "/", Name]));
 
 systop(Name) when is_binary(Name) ->
     list_to_binary(["$SYS/brokers/", atom_to_list(node()), "/", Name]).
 
--spec feed_var(binary(), binary(), binary()) -> binary().
+-spec(feed_var(binary(), binary(), binary()) -> binary()).
 feed_var(Var, Val, Topic) ->
     feed_var(Var, Val, words(Topic), []).
 feed_var(_Var, _Val, [], Acc) ->
@@ -196,7 +161,7 @@ feed_var(Var, Val, [Var|Words], Acc) ->
 feed_var(Var, Val, [W|Words], Acc) ->
     feed_var(Var, Val, Words, [W|Acc]).
 
--spec join(list(binary())) -> binary().
+-spec(join(list(binary())) -> binary()).
 join([]) ->
     <<>>;
 join([W]) ->

@@ -69,17 +69,14 @@
         %% Packet
         {packet, [
             %% Max ClientId Length Allowed
-            {max_clientid_len, 1024},
+            {max_clientid_len, 512},
             %% Max Packet Size Allowed, 64K default
-            {max_packet_size,  65536}
+            {max_packet_size, 65536}
         ]},
         %% Client
         {client, [
             %% Socket is connected, but no 'CONNECT' packet received
-            {idle_timeout, 20} %% seconds
-            %TODO: Network ingoing limit
-            %{ingoing_rate_limit, '64KB/s'}
-            %TODO: Reconnet control
+            {idle_timeout, 30} %% seconds
         ]},
         %% Session
         {session, [
@@ -99,8 +96,8 @@
             %% Statistics Collection Interval(seconds)
             {collect_interval, 0},
 
-            %% Expired after 2 days
-            {expired_after, 48}
+            %% Expired after 2 day (unit: minute)
+            {expired_after, 2880}
 
         ]},
         %% Queue
@@ -146,15 +143,9 @@
         {pubsub, [
             %% Default should be scheduler numbers
             {pool_size, 8},
-            
-            %% Subscription: disc | ram | false
-            {subscription, ram},
 
-            %% Route shard
-            {route_shard, false},
-
-            %% Route delay, false | integer
-            {route_delay, false},
+            %% Store Subscription: true | false
+            {subscription, true},
 
             %% Route aging time(seconds)
             {route_aging, 5}
@@ -173,19 +164,17 @@
     {modules, [
         %% Client presence management module.
         %% Publish messages when client connected or disconnected
-        {presence, [{qos, 0}]}
+        {presence, [{qos, 0}]},
 
         %% Subscribe topics automatically when client connected
-        %% {subscription, [
-        %%    %% Subscription from stored table
-        %%    stored,
-        %%
-        %%   %% $u will be replaced with username
-        %%    {"$Q/username/$u", 1},
-        %%
-        %%   %% $c will be replaced with clientid
-        %%    {"$Q/client/$c", 1}
-        %% ]}
+        {subscription, [
+
+            %% $c will be replaced by clientid
+            %% {"$queue/clients/$c", 1},
+
+            %% Static subscriptions from backend
+            backend
+        ]}
 
         %% Rewrite rules
         %% {rewrite, [{file, "etc/rewrite.config"}]}
@@ -206,7 +195,7 @@
             {acceptors, 16},
 
             %% Maximum number of concurrent clients
-            {max_clients, 8192},
+            {max_clients, 512},
 
             %% Socket Access Control
             {access, [{allow, all}]},

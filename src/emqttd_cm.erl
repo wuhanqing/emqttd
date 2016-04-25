@@ -1,29 +1,23 @@
-%%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
-%%%
-%%% Permission is hereby granted, free of charge, to any person obtaining a copy
-%%% of this software and associated documentation files (the "Software"), to deal
-%%% in the Software without restriction, including without limitation the rights
-%%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-%%% copies of the Software, and to permit persons to whom the Software is
-%%% furnished to do so, subject to the following conditions:
-%%%
-%%% The above copyright notice and this permission notice shall be included in all
-%%% copies or substantial portions of the Software.
-%%%
-%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-%%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-%%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-%%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-%%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-%%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-%%% SOFTWARE.
-%%%-----------------------------------------------------------------------------
-%%% @doc MQTT Client Manager
-%%%  
-%%% @author Feng Lee <feng@emqtt.io>
-%%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Copyright (c) 2012-2016 Feng Lee <feng@emqtt.io>.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%--------------------------------------------------------------------
+
+%% @doc MQTT Client Manager
 -module(emqttd_cm).
+
+-behaviour(gen_server2).
 
 -include("emqttd.hrl").
 
@@ -33,8 +27,6 @@
 -export([start_link/3]).
 
 -export([lookup/1, lookup_proc/1, register/1, unregister/1]).
-
--behaviour(gen_server2).
 
 %% gen_server Function Exports
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -47,77 +39,62 @@
 
 -define(POOL, ?MODULE).
 
-%%%=============================================================================
-%%% API
-%%%=============================================================================
+%%--------------------------------------------------------------------
+%% API
+%%--------------------------------------------------------------------
 
-%%------------------------------------------------------------------------------
 %% @doc Start Client Manager
-%% @end
-%%------------------------------------------------------------------------------
--spec start_link(Pool, Id, StatsFun) -> {ok, pid()} | ignore | {error, any()} when
-        Pool :: atom(),
-        Id   :: pos_integer(),
-        StatsFun :: fun().
+-spec(start_link(Pool, Id, StatsFun) -> {ok, pid()} | ignore | {error, any()} when
+      Pool :: atom(),
+      Id   :: pos_integer(),
+      StatsFun :: fun()).
 start_link(Pool, Id, StatsFun) ->
     gen_server2:start_link(?MODULE, [Pool, Id, StatsFun], []).
 
-%%------------------------------------------------------------------------------
 %% @doc Lookup Client by ClientId
-%% @end
-%%------------------------------------------------------------------------------
--spec lookup(ClientId :: binary()) -> mqtt_client() | undefined.
+-spec(lookup(ClientId :: binary()) -> mqtt_client() | undefined).
 lookup(ClientId) when is_binary(ClientId) ->
     case ets:lookup(mqtt_client, ClientId) of
         [Client] -> Client;
         [] -> undefined
     end.
 
-%%------------------------------------------------------------------------------
 %% @doc Lookup client pid by clientId
-%% @end
-%%------------------------------------------------------------------------------
--spec lookup_proc(ClientId :: binary()) -> pid() | undefined.
+-spec(lookup_proc(ClientId :: binary()) -> pid() | undefined).
 lookup_proc(ClientId) when is_binary(ClientId) ->
     try ets:lookup_element(mqtt_client, ClientId, #mqtt_client.client_pid)
     catch
         error:badarg -> undefined
     end.
 
-%%------------------------------------------------------------------------------
 %% @doc Register ClientId with Pid.
-%% @end
-%%------------------------------------------------------------------------------
--spec register(Client :: mqtt_client()) -> ok.
+-spec(register(Client :: mqtt_client()) -> ok).
 register(Client = #mqtt_client{client_id = ClientId}) ->
-    CmPid = gproc_pool:pick_worker(?POOL, ClientId),
-    gen_server2:cast(CmPid, {register, Client}).
+    gen_server2:call(pick(ClientId), {register, Client}, 120000).
 
-%%------------------------------------------------------------------------------
 %% @doc Unregister clientId with pid.
-%% @end
-%%------------------------------------------------------------------------------
--spec unregister(ClientId :: binary()) -> ok.
+-spec(unregister(ClientId :: binary()) -> ok).
 unregister(ClientId) when is_binary(ClientId) ->
-    CmPid = gproc_pool:pick_worker(?POOL, ClientId),
-    gen_server2:cast(CmPid, {unregister, ClientId, self()}).
+    gen_server2:cast(pick(ClientId), {unregister, ClientId, self()}).
 
-%%%=============================================================================
-%%% gen_server callbacks
-%%%=============================================================================
+pick(ClientId) -> gproc_pool:pick_worker(?POOL, ClientId).
+
+%%--------------------------------------------------------------------
+%% gen_server callbacks
+%%--------------------------------------------------------------------
 
 init([Pool, Id, StatsFun]) ->
     ?GPROC_POOL(join, Pool, Id),
-    {ok, #state{pool = Pool, id = Id,
-                statsfun = StatsFun,
-                monitors = dict:new()}}.
+    {ok, #state{pool = Pool, id = Id, statsfun = StatsFun, monitors = dict:new()}}.
 
-prioritise_call(_Req, _From, _Len, _State) ->
-    1.
+prioritise_call(Req, _From, _Len, _State) ->
+    case Req of
+        {register,   _Client} -> 2;
+        _                     -> 1
+    end.
 
 prioritise_cast(Msg, _Len, _State) ->
     case Msg of
-        {register,   _Client}         -> 2;
         {unregister, _ClientId, _Pid} -> 9;
         _                             -> 1
     end.
@@ -125,18 +102,18 @@ prioritise_cast(Msg, _Len, _State) ->
 prioritise_info(_Msg, _Len, _State) ->
     3.
 
-handle_call(Req, _From, State) ->
-    ?UNEXPECTED_REQ(Req, State).
-
-handle_cast({register, Client = #mqtt_client{client_id  = ClientId,
-                                             client_pid = Pid}}, State) ->
+handle_call({register, Client = #mqtt_client{client_id  = ClientId,
+                                             client_pid = Pid}}, _From, State) ->
     case lookup_proc(ClientId) of
         Pid ->
-            {noreply, State};
+            {reply, ok, State};
         _ ->
             ets:insert(mqtt_client, Client),
-            {noreply, setstats(monitor_client(ClientId, Pid, State))}
+            {reply, ok, setstats(monitor_client(ClientId, Pid, State))}
     end;
+
+handle_call(Req, _From, State) ->
+    ?UNEXPECTED_REQ(Req, State).
 
 handle_cast({unregister, ClientId, Pid}, State) ->
     case lookup_proc(ClientId) of
@@ -174,9 +151,9 @@ terminate(_Reason, #state{pool = Pool, id = Id}) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%%%=============================================================================
-%%% Internal functions
-%%%=============================================================================
+%%--------------------------------------------------------------------
+%% Internal functions
+%%--------------------------------------------------------------------
 
 monitor_client(ClientId, Pid, State = #state{monitors = Monitors}) ->
     MRef = erlang:monitor(process, Pid),

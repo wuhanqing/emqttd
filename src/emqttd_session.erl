@@ -1,49 +1,42 @@
-%%%-----------------------------------------------------------------------------
-%%% Copyright (c) 2012-2016 eMQTT.IO, All Rights Reserved.
-%%%
-%%% Permission is hereby granted, free of charge, to any person obtaining a copy
-%%% of this software and associated documentation files (the "Software"), to deal
-%%% in the Software without restriction, including without limitation the rights
-%%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-%%% copies of the Software, and to permit persons to whom the Software is
-%%% furnished to do so, subject to the following conditions:
-%%%
-%%% The above copyright notice and this permission notice shall be included in all
-%%% copies or substantial portions of the Software.
-%%%
-%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-%%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-%%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-%%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-%%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-%%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-%%% SOFTWARE.
-%%%-----------------------------------------------------------------------------
-%%% @doc Session for persistent MQTT client.
-%%%
-%%% Session State in the broker consists of:
-%%%
-%%% 1. The Client’s subscriptions.
-%%%
-%%% 2. inflight qos1/2 messages sent to the client but unacked, QoS 1 and QoS 2
-%%%    messages which have been sent to the Client, but have not been completely
-%%%    acknowledged.
-%%%
-%%% 3. inflight qos2 messages received from client and waiting for pubrel. QoS 2
-%%%    messages which have been received from the Client, but have not been
-%%%    completely acknowledged.
-%%%
-%%% 4. all qos1, qos2 messages published to when client is disconnected.
-%%%    QoS 1 and QoS 2 messages pending transmission to the Client.
-%%%
-%%% 5. Optionally, QoS 0 messages pending transmission to the Client.
-%%%
-%%% State of Message:  newcome, inflight, pending
-%%%
-%%% @end
-%%%
-%%% @author Feng Lee <feng@emqtt.io>
-%%%-----------------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% Copyright (c) 2012-2016 Feng Lee <feng@emqtt.io>.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%--------------------------------------------------------------------
+
+%% @doc Session for persistent MQTT client.
+%%
+%% Session State in the broker consists of:
+%%
+%% 1. The Client’s subscriptions.
+%%
+%% 2. inflight qos1/2 messages sent to the client but unacked, QoS 1 and QoS 2
+%%    messages which have been sent to the Client, but have not been completely
+%%    acknowledged.
+%%
+%% 3. inflight qos2 messages received from client and waiting for pubrel. QoS 2
+%%    messages which have been received from the Client, but have not been
+%%    completely acknowledged.
+%%
+%% 4. all qos1, qos2 messages published to when client is disconnected.
+%%    QoS 1 and QoS 2 messages pending transmission to the Client.
+%%
+%% 5. Optionally, QoS 0 messages pending transmission to the Client.
+%%
+%% State of Message:  newcome, inflight, pending
+%%
+%% @end
+
 -module(emqttd_session).
 
 -include("emqttd.hrl").
@@ -53,6 +46,8 @@
 -include("emqttd_internal.hrl").
 
 -behaviour(gen_server2).
+
+-import(proplists, [get_value/2, get_value/3]).
 
 %% Session API
 -export([start_link/3, resume/3, info/1, destroy/2]).
@@ -140,46 +135,35 @@
             lager:Level([{client, State#session.client_id}],
                         "Session(~s): " ++ Format, [State#session.client_id | Args])).
 
-%%------------------------------------------------------------------------------
 %% @doc Start a session.
-%% @end
-%%------------------------------------------------------------------------------
--spec start_link(boolean(), mqtt_client_id(), pid()) -> {ok, pid()} | {error, any()}.
+-spec(start_link(boolean(), mqtt_client_id(), pid()) -> {ok, pid()} | {error, any()}).
 start_link(CleanSess, ClientId, ClientPid) ->
     gen_server2:start_link(?MODULE, [CleanSess, ClientId, ClientPid], []).
 
-%%------------------------------------------------------------------------------
 %% @doc Resume a session.
-%% @end
-%%------------------------------------------------------------------------------
--spec resume(pid(), mqtt_client_id(), pid()) -> ok.
+-spec(resume(pid(), mqtt_client_id(), pid()) -> ok).
 resume(SessPid, ClientId, ClientPid) ->
     gen_server2:cast(SessPid, {resume, ClientId, ClientPid}).
 
-%%------------------------------------------------------------------------------
 %% @doc Session Info.
-%% @end
-%%------------------------------------------------------------------------------
 info(SessPid) ->
     gen_server2:call(SessPid, info).
 
-%%------------------------------------------------------------------------------
 %% @doc Destroy a session.
-%% @end
-%%------------------------------------------------------------------------------
--spec destroy(pid(), mqtt_client_id()) -> ok.
+-spec(destroy(pid(), mqtt_client_id()) -> ok).
 destroy(SessPid, ClientId) ->
     gen_server2:cast(SessPid, {destroy, ClientId}).
 
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
+%% PubSub
+%%--------------------------------------------------------------------
+
 %% @doc Subscribe Topics
-%% @end
-%%------------------------------------------------------------------------------
--spec subscribe(pid(), [{binary(), mqtt_qos()}]) -> ok.
+-spec(subscribe(pid(), [{binary(), mqtt_qos()}]) -> ok).
 subscribe(SessPid, TopicTable) ->
     gen_server2:cast(SessPid, {subscribe, TopicTable, fun(_) -> ok end}).
 
--spec subscribe(pid(), mqtt_packet_id(), [{binary(), mqtt_qos()}]) -> ok.
+-spec(subscribe(pid(), mqtt_packet_id(), [{binary(), mqtt_qos()}]) -> ok).
 subscribe(SessPid, PacketId, TopicTable) ->
     From   = self(),
     AckFun = fun(GrantedQos) ->
@@ -187,54 +171,45 @@ subscribe(SessPid, PacketId, TopicTable) ->
              end,
     gen_server2:cast(SessPid, {subscribe, TopicTable, AckFun}).
 
-%%------------------------------------------------------------------------------
 %% @doc Publish message
-%% @end
-%%------------------------------------------------------------------------------
--spec publish(pid(), mqtt_message()) -> ok | {error, any()}.
+-spec(publish(pid(), mqtt_message()) -> ok | {error, any()}).
 publish(_SessPid, Msg = #mqtt_message{qos = ?QOS_0}) ->
     %% publish qos0 directly
-    emqttd_pubsub:publish(Msg);
+    emqttd:publish(Msg);
 
 publish(_SessPid, Msg = #mqtt_message{qos = ?QOS_1}) ->
     %% publish qos1 directly, and client will puback automatically
-    emqttd_pubsub:publish(Msg);
+    emqttd:publish(Msg);
 
 publish(SessPid, Msg = #mqtt_message{qos = ?QOS_2}) ->
     %% publish qos2 by session 
     gen_server2:call(SessPid, {publish, Msg}, ?PUBSUB_TIMEOUT).
 
-%%------------------------------------------------------------------------------
 %% @doc PubAck message
-%% @end
-%%------------------------------------------------------------------------------
--spec puback(pid(), mqtt_packet_id()) -> ok.
+-spec(puback(pid(), mqtt_packet_id()) -> ok).
 puback(SessPid, PktId) ->
     gen_server2:cast(SessPid, {puback, PktId}).
 
--spec pubrec(pid(), mqtt_packet_id()) -> ok.
+-spec(pubrec(pid(), mqtt_packet_id()) -> ok).
 pubrec(SessPid, PktId) ->
     gen_server2:cast(SessPid, {pubrec, PktId}).
 
--spec pubrel(pid(), mqtt_packet_id()) -> ok.
+-spec(pubrel(pid(), mqtt_packet_id()) -> ok).
 pubrel(SessPid, PktId) ->
     gen_server2:cast(SessPid, {pubrel, PktId}).
 
--spec pubcomp(pid(), mqtt_packet_id()) -> ok.
+-spec(pubcomp(pid(), mqtt_packet_id()) -> ok).
 pubcomp(SessPid, PktId) ->
     gen_server2:cast(SessPid, {pubcomp, PktId}).
 
-%%------------------------------------------------------------------------------
 %% @doc Unsubscribe Topics
-%% @end
-%%------------------------------------------------------------------------------
--spec unsubscribe(pid(), [binary()]) -> ok.
+-spec(unsubscribe(pid(), [binary()]) -> ok).
 unsubscribe(SessPid, Topics) ->
     gen_server2:cast(SessPid, {unsubscribe, Topics}).
 
-%%%=============================================================================
-%%% gen_server callbacks
-%%%=============================================================================
+%%--------------------------------------------------------------------
+%% gen_server callbacks
+%%--------------------------------------------------------------------
 
 init([CleanSess, ClientId, ClientPid]) ->
     process_flag(trap_exit, true),
@@ -247,16 +222,16 @@ init([CleanSess, ClientId, ClientPid]) ->
             client_pid        = ClientPid,
             subscriptions     = dict:new(),
             inflight_queue    = [],
-            max_inflight      = emqttd_opts:g(max_inflight, SessEnv, 0),
+            max_inflight      = get_value(max_inflight, SessEnv, 0),
             message_queue     = emqttd_mqueue:new(ClientId, QEnv, emqttd_alarm:alarm_fun()),
             awaiting_rel      = #{},
             awaiting_ack      = #{},
             awaiting_comp     = #{},
-            retry_interval    = emqttd_opts:g(unack_retry_interval, SessEnv),
-            await_rel_timeout = emqttd_opts:g(await_rel_timeout, SessEnv),
-            max_awaiting_rel  = emqttd_opts:g(max_awaiting_rel, SessEnv),
-            expired_after     = emqttd_opts:g(expired_after, SessEnv) * 3600,
-            collect_interval  = emqttd_opts:g(collect_interval, SessEnv, 0),
+            retry_interval    = get_value(unack_retry_interval, SessEnv),
+            await_rel_timeout = get_value(await_rel_timeout, SessEnv),
+            max_awaiting_rel  = get_value(max_awaiting_rel, SessEnv),
+            expired_after     = get_value(expired_after, SessEnv) * 60,
+            collect_interval  = get_value(collect_interval, SessEnv, 0),
             timestamp         = os:timestamp()},
     emqttd_sm:register_session(CleanSess, ClientId, sess_info(Session)),
     %% Run hooks
@@ -312,63 +287,62 @@ handle_call({publish, Msg = #mqtt_message{qos = ?QOS_2, pktid = PktId}},
 handle_call(Req, _From, State) ->
     ?UNEXPECTED_REQ(Req, State).
 
-handle_cast({subscribe, TopicTable0, AckFun}, Session = #session{client_id = ClientId,
+handle_cast({subscribe, TopicTable0, AckFun}, Session = #session{client_id     = ClientId,
                                                                  subscriptions = Subscriptions}) ->
 
-    TopicTable = emqttd_broker:foldl_hooks('client.subscribe', [ClientId], TopicTable0),
+    case emqttd:run_hooks('client.subscribe', [ClientId], TopicTable0) of
+        {ok, TopicTable} ->
+            ?LOG(info, "Subscribe ~p", [TopicTable], Session),
+            Subscriptions1 = lists:foldl(
+                fun({Topic, Qos}, SubDict) ->
+                    case dict:find(Topic, SubDict) of
+                        {ok, Qos} ->
+                            ?LOG(warning, "duplicated subscribe: ~s, qos = ~w", [Topic, Qos], Session),
+                            SubDict;
+                        {ok, OldQos} ->
+                            emqttd_server:update_subscription(ClientId, Topic, OldQos, Qos),
+                            ?LOG(warning, "duplicated subscribe ~s, old_qos=~w, new_qos=~w", [Topic, OldQos, Qos], Session),
+                            dict:store(Topic, Qos, SubDict);
+                        error ->
+                            emqttd:subscribe(ClientId, Topic, Qos),
+                            %%TODO: the design is ugly...
+                            %% <MQTT V3.1.1>: 3.8.4
+                            %% Where the Topic Filter is not identical to any existing Subscription’s filter,
+                            %% a new Subscription is created and all matching retained messages are sent.
+                            emqttd_retainer:dispatch(Topic, self()),
 
-    case TopicTable -- dict:to_list(Subscriptions) of
-        [] ->
+                            dict:store(Topic, Qos, SubDict)
+                    end
+                end, Subscriptions, TopicTable),
             AckFun([Qos || {_, Qos} <- TopicTable]),
-            hibernate(Session);
-        _  ->
-            %% subscribe first and don't care if the subscriptions have been existed
-            {ok, GrantedQos} = emqttd_pubsub:subscribe(ClientId, TopicTable),
-
-            AckFun(GrantedQos),
-
-            emqttd_broker:foreach_hooks('client.subscribe.after', [ClientId, TopicTable]),
-
-            ?LOG(info, "Subscribe ~p, Granted QoS: ~p", [TopicTable, GrantedQos], Session),
-
-            Subscriptions1 =
-            lists:foldl(fun({Topic, Qos}, Dict) ->
-                            case dict:find(Topic, Dict) of
-                                {ok, Qos} ->
-                                    ?LOG(warning, "resubscribe ~s, qos = ~w", [Topic, Qos], Session),
-                                    Dict;
-                                {ok, OldQos} ->
-                                    ?LOG(warning, "resubscribe ~s, old qos=~w, new qos=~w", [Topic, OldQos, Qos], Session),
-                                    dict:store(Topic, Qos, Dict);
-                                error ->
-                                    %%TODO: the design is ugly, rewrite later...:(
-                                    %% <MQTT V3.1.1>: 3.8.4
-                                    %% Where the Topic Filter is not identical to any existing Subscription’s filter,
-                                    %% a new Subscription is created and all matching retained messages are sent.
-                                    emqttd_retainer:dispatch(Topic, self()),
-
-                                    dict:store(Topic, Qos, Dict)
-                            end
-                        end, Subscriptions, TopicTable),
-            hibernate(Session#session{subscriptions = Subscriptions1})
+            emqttd:run_hooks('client.subscribe.after', [ClientId], TopicTable),
+            hibernate(Session#session{subscriptions = Subscriptions1});
+        {stop, TopicTable} ->
+            ?LOG(error, "Cannot subscribe: ~p", [TopicTable], Session),
+            hibernate(Session)
     end;
 
 handle_cast({unsubscribe, Topics0}, Session = #session{client_id     = ClientId,
                                                        subscriptions = Subscriptions}) ->
 
-    Topics = emqttd_broker:foldl_hooks('client.unsubscribe', [ClientId], Topics0),
-
-    %% unsubscribe from topic tree
-    ok = emqttd_pubsub:unsubscribe(Topics),
-
-    ?LOG(info, "unsubscribe ~p", [Topics], Session),
-
-    Subscriptions1 =
-    lists:foldl(fun(Topic, Dict) ->
-                    dict:erase(Topic, Dict)
+    case emqttd:run_hooks('client.unsubscribe', [ClientId], Topics0) of
+        {ok, Topics} ->
+            ?LOG(info, "unsubscribe ~p", [Topics], Session),
+            Subscriptions1 = lists:foldl(
+                fun(Topic, SubDict) ->
+                    case dict:find(Topic, SubDict) of
+                        {ok, Qos} ->
+                            emqttd:unsubscribe(ClientId, Topic, Qos),
+                            dict:erase(Topic, SubDict);
+                        error ->
+                            SubDict
+                    end
                 end, Subscriptions, Topics),
-
-    hibernate(Session#session{subscriptions = Subscriptions1});
+            hibernate(Session#session{subscriptions = Subscriptions1});
+        {stop, Topics} ->
+            ?LOG(info, "Cannot unsubscribe: ~p", [Topics], Session),
+            hibernate(Session)
+    end;
 
 handle_cast({destroy, ClientId}, Session = #session{client_id = ClientId}) ->
     ?LOG(warning, "destroyed", [], Session),
@@ -466,7 +440,7 @@ handle_cast({pubrel, PktId}, Session = #session{awaiting_rel = AwaitingRel}) ->
     case maps:find(PktId, AwaitingRel) of
         {ok, {Msg, TRef}} ->
             cancel_timer(TRef),
-            emqttd_pubsub:publish(Msg),
+            emqttd:publish(Msg),
             hibernate(Session#session{awaiting_rel = maps:remove(PktId, AwaitingRel)});
         error ->
             ?LOG(error, "Cannot find PUBREL: ~p", [PktId], Session),
@@ -578,13 +552,9 @@ terminate(Reason, #session{clean_sess = CleanSess, client_id = ClientId}) ->
 code_change(_OldVsn, Session, _Extra) ->
     {ok, Session}.
 
-%%%=============================================================================
-%%% Internal functions
-%%%=============================================================================
-
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% Kick old client out
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 kick(_ClientId, undefined, _Pid) ->
     ignore;
 kick(_ClientId, Pid, Pid) ->
@@ -595,9 +565,9 @@ kick(ClientId, OldPid, Pid) ->
     %% Clean noproc
     receive {'EXIT', OldPid, _} -> ok after 0 -> ok end.
 
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% Dispatch Messages
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 
 %% Queue message if client disconnected
 dispatch(_Msg, Session = #session{client_pid = undefined}) ->
@@ -631,9 +601,9 @@ tune_qos(Topic, Msg = #mqtt_message{qos = PubQos}, Subscriptions) ->
             Msg
     end.
 
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% Check inflight and awaiting_rel
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 
 %% For Chat
 is_inflight(#mqtt_message{msgid = undefined}, _InflightQ) ->
@@ -652,9 +622,9 @@ check_awaiting_rel(#session{awaiting_rel     = AwaitingRel,
                             max_awaiting_rel = MaxLen}) ->
     maps:size(AwaitingRel) < MaxLen.
 
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% Dequeue and Deliver
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 
 dequeue(Session = #session{client_pid = undefined}) ->
     %% do nothing if client is disconnected
@@ -694,7 +664,7 @@ redeliver(Msg = #mqtt_message{qos = QoS}, Session = #session{client_pid = Client
     ClientPid ! {deliver, Msg#mqtt_message{dup = true}},
     await(Msg, Session).
 
-%%------------------------------------------------------------------------------
+%%--------------------------------------------------------------------
 %% Awaiting ack for qos1, qos2 message
 %%------------------------------------------------------------------------------
 await(#mqtt_message{pktid = PktId}, Session = #session{awaiting_ack   = Awaiting,
@@ -708,7 +678,7 @@ acked(PktId, Session = #session{client_id      = ClientId,
                                 awaiting_ack   = Awaiting}) ->
     case lists:keyfind(PktId, 1, InflightQ) of
         {_, Msg} ->
-            emqttd_broker:foreach_hooks('message.acked', [ClientId, Msg]);
+            emqttd:run_hooks('message.acked', [ClientId], Msg);
         false ->
             ?LOG(error, "Cannot find acked pktid: ~p", [PktId], Session)
     end,
@@ -757,8 +727,8 @@ sess_info(#session{clean_sess      = CleanSess,
     [{clean_sess,     CleanSess},
      {max_inflight,   MaxInflight},
      {inflight_queue, length(InflightQueue)},
-     {message_queue,  proplists:get_value(len, Stats)},
-     {message_dropped,proplists:get_value(dropped, Stats)},
+     {message_queue,  get_value(len, Stats)},
+     {message_dropped,get_value(dropped, Stats)},
      {awaiting_rel,   maps:size(AwaitingRel)},
      {awaiting_ack,   maps:size(AwaitingAck)},
      {awaiting_comp,  maps:size(AwaitingComp)},
