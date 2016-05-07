@@ -118,6 +118,7 @@
     topic           :: binary(),              %% Topic that the message is published to
     from            :: binary() | atom(),     %% ClientId of the publisher
     sender          :: binary() | undefined,  %% Username of the publisher
+    syncid          :: binary(),          %% TODO:
     qos    = 0      :: 0 | 1 | 2,             %% Message QoS
     flags  = []     :: [retain | dup | sys],  %% Message Flags
     retain = false  :: boolean(),             %% Retain flag
