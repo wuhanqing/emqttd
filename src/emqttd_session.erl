@@ -310,7 +310,7 @@ handle_cast({subscribe, TopicTable0, AckFun}, Session = #session{client_id = Cli
                                                                  username  = Username,
                                                                  subscriptions = Subscriptions}) ->
 
-    case emqttd:run_hooks('client.subscribe', [ClientId], TopicTable0) of
+    case emqttd:run_hooks('client.subscribe', [ClientId, Username], TopicTable0) of
         {ok, TopicTable} ->
             ?LOG(info, "Subscribe ~p", [TopicTable], Session),
             Subscriptions1 = lists:foldl(
@@ -335,7 +335,7 @@ handle_cast({subscribe, TopicTable0, AckFun}, Session = #session{client_id = Cli
                     end
                 end, Subscriptions, TopicTable),
             AckFun([Qos || {_, Qos} <- TopicTable]),
-            emqttd:run_hooks('client.subscribe.after', [ClientId], TopicTable),
+            emqttd:run_hooks('client.subscribe.after', [ClientId, Username], TopicTable),
             hibernate(Session#session{subscriptions = Subscriptions1});
         {stop, TopicTable} ->
             ?LOG(error, "Cannot subscribe: ~p", [TopicTable], Session),
