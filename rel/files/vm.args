@@ -10,7 +10,7 @@
 #-name emqttd@localhost.
 
 ## Cookie for distributed erlang
--setcookie emqttdsecretcookie
+-setcookie emqchatsecretcookie
 
 ##-------------------------------------------------------------------------
 ## Flags

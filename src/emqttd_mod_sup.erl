@@ -21,30 +21,43 @@
 -include("emqttd.hrl").
 
 %% API
--export([start_link/0, start_child/1, start_child/2]).
+-export([start_link/0, start_mod/1, start_mod/2, stop_mod/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
 
+-define(SUPERVISOR, ?MODULE).
+
 %% Helper macro for declaring children of supervisor
--define(CHILD(Mod, Type), {Mod, {Mod, start_link, []}, permanent, 5000, Type, [Mod]}).
+-define(CHILD(Mod, Type), {Mod, {Mod, start_link, []},
+                               permanent, 5000, Type, [Mod]}).
+
+-define(CHILD(Mod, Type, Opts), {Mod, {Mod, start_link, [Opts]},
+                                     permanent, 5000, Type, [Mod]}).
 
 %%--------------------------------------------------------------------
 %% API
 %%--------------------------------------------------------------------
 
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    supervisor:start_link({local, ?SUPERVISOR}, ?MODULE, []).
 
-start_child(ChildSpec) when is_tuple(ChildSpec) ->
-    supervisor:start_child(?MODULE, ChildSpec).
+%%%=============================================================================
+%%% API
+%%%=============================================================================
+start_mod(Mod) ->
+	supervisor:start_child(?SUPERVISOR, ?CHILD(Mod, worker)).
 
-%%
-%% start_child(Mod::atom(), Type::type()) -> {ok, pid()}
-%% @type type() = worker | supervisor
-%%
-start_child(Mod, Type) when is_atom(Mod) and is_atom(Type) ->
-    supervisor:start_child(?MODULE, ?CHILD(Mod, Type)).
+start_mod(Mod, Opts) ->
+	supervisor:start_child(?SUPERVISOR, ?CHILD(Mod, worker, Opts)).
+
+stop_mod(Mod) ->
+	case supervisor:terminate_child(?SUPERVISOR, Mod) of
+        ok ->
+            supervisor:delete_child(?SUPERVISOR, Mod);
+        {error, Reason} ->
+            {error, Reason}
+	end.
 
 %%--------------------------------------------------------------------
 %% Supervisor callbacks
@@ -52,4 +65,5 @@ start_child(Mod, Type) when is_atom(Mod) and is_atom(Type) ->
 
 init([]) ->
     {ok, {{one_for_one, 10, 100}, []}}.
+
 

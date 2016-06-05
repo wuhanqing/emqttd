@@ -150,4 +150,3 @@ match_pattern(SubId, Topic) ->
 
 return({atomic, ok})      -> ok;
 return({aborted, Reason}) -> {error, Reason}.
-
