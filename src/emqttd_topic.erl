@@ -22,7 +22,7 @@
 
 -export([join/1, feed_var/3, systop/1]).
 
--export([strip/1, strip/2]).
+-export([parse/1, parse/2]).
 
 -type(topic() :: binary()).
 
@@ -172,28 +172,28 @@ join(Words) ->
                 end, {true, <<>>}, [bin(W) || W <- Words]),
     Bin.
 
--spec(strip(topic()) -> {topic(), [local | {share, binary()}]}).
-strip(Topic) when is_binary(Topic) ->
-    strip(Topic, []).
+-spec(parse(topic()) -> {topic(), [local | {share, binary()}]}).
+parse(Topic) when is_binary(Topic) ->
+    parse(Topic, []).
 
-strip(Topic = <<"$local/", Topic1/binary>>, Options) ->
+parse(Topic = <<"$local/", Topic1/binary>>, Options) ->
     case lists:member(local, Options) of
         true  -> error({invalid_topic, Topic});
-        false -> strip(Topic1, [local | Options])
+        false -> parse(Topic1, [local | Options])
     end;
 
-strip(Topic = <<"$queue/", Topic1/binary>>, Options) ->
+parse(Topic = <<"$queue/", Topic1/binary>>, Options) ->
     case lists:keyfind(share, 1, Options) of
         {share, _} -> error({invalid_topic, Topic});
-        false      -> strip(Topic1, [{share, '$queue'} | Options])
+        false      -> parse(Topic1, [{share, '$queue'} | Options])
     end;
 
-strip(Topic = <<"$share/", Topic1/binary>>, Options) ->
+parse(Topic = <<"$share/", Topic1/binary>>, Options) ->
     case lists:keyfind(share, 1, Options) of
         {share, _} -> error({invalid_topic, Topic});
         false      -> [Share, Topic2] = binary:split(Topic1, <<"/">>),
                       {Topic2, [{share, Share} | Options]}
     end;
 
-strip(Topic, Options) -> {Topic, Options}.
+parse(Topic, Options) -> {Topic, Options}.
 

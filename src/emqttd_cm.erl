@@ -26,7 +26,7 @@
 %% API Exports 
 -export([start_link/3]).
 
--export([lookup/1, lookup_proc/1, reg/1, unreg/1]).
+-export([lookup/1, lookup_proc/1, reg/1, unreg/1, deliver/3]).
 
 %% gen_server Function Exports
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -71,7 +71,14 @@ reg(Client = #mqtt_client{client_id = ClientId}) ->
 unreg(ClientId) when is_binary(ClientId) ->
     gen_server2:cast(pick(ClientId), {unreg, ClientId, self()}).
 
-pick(ClientId) -> gproc_pool:pick_worker(?POOL, ClientId).
+pick(ClientId) ->
+    gproc_pool:pick_worker(?POOL, ClientId).
+
+deliver(ClientId, Topic, Msg) ->
+    case lookup_proc(ClientId) of
+        undefined -> ok;
+        Pid       -> Pid ! {deliver, Topic, Msg}
+    end.
 
 %%--------------------------------------------------------------------
 %% gen_server callbacks

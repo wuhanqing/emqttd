@@ -152,21 +152,14 @@ handle_info(timeout, State) ->
 handle_info({shutdown, Error}, State) ->
     shutdown(Error, State);
 
-%% Asynchronous SUBACK
-handle_info({suback, PacketId, GrantedQos}, State) ->
+handle_info({deliver, Topic, Message}, State) ->
     with_proto_state(fun(ProtoState) ->
-                       Packet = ?SUBACK_PACKET(PacketId, GrantedQos),
-                       emqttd_protocol:send(Packet, ProtoState)
+                       emqttd_protocol:deliver(Topic, Message, ProtoState)
                      end, State);
 
-handle_info({deliver, Message}, State) ->
+handle_info({timeout, awaiting_ack, PktId}, State) ->
     with_proto_state(fun(ProtoState) ->
-                       emqttd_protocol:send(Message, ProtoState)
-                     end, State);
-
-handle_info({redeliver, {?PUBREL, PacketId}}, State) ->
-    with_proto_state(fun(ProtoState) ->
-                       emqttd_protocol:redeliver({?PUBREL, PacketId}, ProtoState)
+                       emqttd_protocol:timeout({awaiting_ack, PktId}, ProtoState)
                      end, State);
 
 handle_info({shutdown, conflict, {ClientId, NewPid}}, State) ->

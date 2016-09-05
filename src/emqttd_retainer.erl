@@ -111,7 +111,7 @@ dispatch(Topic, CPid) when is_binary(Topic) ->
              false -> read_messages(Topic);
              true  -> match_messages(Topic)
            end,
-    lists:foreach(fun(Msg) -> CPid ! {dispatch, Topic, Msg} end, lists:reverse(Msgs)).
+    lists:foreach(fun(Msg) -> CPid ! {deliver, Topic, Msg} end, lists:reverse(Msgs)).
 
 %%--------------------------------------------------------------------
 %% gen_server callbacks

@@ -91,9 +91,9 @@ dispatch(Topic, Delivery = #mqtt_delivery{message = Msg, flows = Flows}) ->
     end.
 
 dispatch(Pid, Topic, Msg) when is_pid(Pid) ->
-    Pid ! {dispatch, Topic, Msg};
+    Pid ! {deliver, Topic, Msg};
 dispatch(SubId, Topic, Msg) when is_binary(SubId) ->
-    emqttd_sm:dispatch(SubId, Topic, Msg).
+    emqttd_cm:deliver(SubId, Topic, Msg).
 
 subscribers(Topic) ->
     try ets:lookup_element(mqtt_subscriber, Topic, 2) catch error:badarg -> [] end.

@@ -23,7 +23,7 @@
 -include("emqttd_protocol.hrl").
 
 %% API Exports
--export([start_link/4, session/1, info/1, kick/1]).
+-export([start_link/4, info/1, kick/1]).
 
 %% SUB/UNSUB Asynchronously
 -export([subscribe/2, unsubscribe/2]).
@@ -41,9 +41,6 @@
 %% @doc Start WebSocket Client.
 start_link(MqttEnv, WsPid, Req, ReplyChannel) ->
     gen_server:start_link(?MODULE, [MqttEnv, WsPid, Req, ReplyChannel], []).
-
-session(CPid) ->
-    gen_server:call(CPid, session, infinity).
 
 info(CPid) ->
     gen_server:call(CPid, info, infinity).
@@ -81,9 +78,6 @@ init([MqttEnv, WsPid, Req, ReplyChannel]) ->
 idle_timeout(MqttEnv) ->
     timer:seconds(proplists:get_value(client_idle_timeout, MqttEnv, 10)).
 
-handle_call(session, _From, State = #wsclient_state{proto_state = ProtoState}) ->
-    {reply, emqttd_protocol:session(ProtoState), State};
-
 handle_call(info, _From, State = #wsclient_state{peer = Peer,
                                                  proto_state = ProtoState}) ->
     ProtoInfo = emqttd_protocol:info(ProtoState),
@@ -97,14 +91,14 @@ handle_call(Req, _From, State = #wsclient_state{peer = Peer}) ->
     {reply, {error, unsupported_request}, State}.
 
 handle_cast({subscribe, TopicTable}, State) ->
-    with_session(fun(SessPid) ->
-                   emqttd_session:subscribe(SessPid, TopicTable)
-                 end, State);
+    with_proto_state(fun(ProtoState) ->
+                emqttd_protocol:handle({subscribe, TopicTable}, ProtoState)
+        end, State);
 
 handle_cast({unsubscribe, Topics}, State) ->
-    with_session(fun(SessPid) ->
-                   emqttd_session:unsubscribe(SessPid, Topics)
-                 end, State);
+    with_proto_state(fun(ProtoState) ->
+                emqttd_protocol:handle({unsubscribe, Topics}, ProtoState)
+        end, State);
 
 handle_cast({received, Packet}, State = #wsclient_state{peer = Peer, proto_state = ProtoState}) ->
     case emqttd_protocol:received(Packet, ProtoState) of
@@ -126,20 +120,14 @@ handle_cast(Msg, State = #wsclient_state{peer = Peer}) ->
 handle_info(timeout, State) ->
     shutdown(idle_timeout, State);
 
-handle_info({suback, PacketId, GrantedQos}, State) ->
+handle_info({deliver, Topic, Message}, State) ->
     with_proto_state(fun(ProtoState) ->
-                       Packet = ?SUBACK_PACKET(PacketId, GrantedQos),
-                       emqttd_protocol:send(Packet, ProtoState)
+                       emqttd_protocol:deliver(Topic, Message, ProtoState)
                      end, State);
 
-handle_info({deliver, Message}, State) ->
+handle_info({timeout, awaiting_ack, PktId}, State) ->
     with_proto_state(fun(ProtoState) ->
-                       emqttd_protocol:send(Message, ProtoState)
-                     end, State);
-
-handle_info({redeliver, {?PUBREL, PacketId}}, State) ->
-    with_proto_state(fun(ProtoState) ->
-                       emqttd_protocol:redeliver({?PUBREL, PacketId}, ProtoState)
+                       emqttd_protocol:timeout({awaiting_ack, PktId}, ProtoState)
                      end, State);
 
 handle_info({shutdown, conflict, {ClientId, NewPid}}, State = #wsclient_state{peer = Peer}) ->

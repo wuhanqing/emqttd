@@ -14,7 +14,6 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
-%% @doc MQTT Protocol Processor.
 -module(emqttd_protocol).
 
 -include("emqttd.hrl").
@@ -28,25 +27,28 @@
 %% API
 -export([init/3, info/1, clientid/1, client/1]).
 
--export([received/2, handle/2, send/2, redeliver/2, shutdown/2]).
+-export([received/2, handle/2, deliver/3, send/2, timeout/2, shutdown/2]).
 
 -export([process/2]).
  
--record(session_state, {packet_id  = 1, %% Last packet id of the session
-                        %% Client’s subscriptions.
-                        subscriptions :: map(),
-                        %% Awaiting timers for ack, rel.
-                        awaiting_ack  :: map(),
-                        %% Retry interval for redelivering QoS1 messages
-                        retry_interval = 30}).
-
 %% Protocol State
 -record(proto_state, {peername, sendfun, connected = false,
                       client_id, client_pid, clean_sess,
                       proto_ver, proto_name, username,
-                      will_msg, keepalive, max_clientid_len = ?MAX_CLIENTID_LEN,
-                      session :: #session_state{},
-                      ws_initial_headers, %% Headers from first HTTP request for websocket client
+                      will_msg, keepalive,
+                      max_clientid_len = ?MAX_CLIENTID_LEN,
+                      %% Last packet id of the session
+                      packet_id = 1,
+                      %% Client’s subscriptions.
+                      subscriptions :: map(),
+                      inflight = [],
+                      %% Client’s subscriptions.
+                      awaiting_ack :: map(),
+                      %% Retry interval for redelivering QoS1 messages
+                      retry_interval = 30,
+                      %% Headers from first HTTP request for websocket client
+                      ws_initial_headers,
+                      %% Connected at
                       connected_at}).
 
 -type(proto_state() :: #proto_state{}).
@@ -101,7 +103,7 @@ client(#proto_state{client_id          = ClientId,
 
 %% CONNECT – Client requests a connection to a Server
 
-%% A Client can only send the CONNECT Packet once over a Network Connection. 
+%% A Client can only send the CONNECT Packet once over a Network Connection.
 -spec(received(mqtt_packet(), proto_state()) -> {ok, proto_state()} | {error, any()}).
 received(Packet = ?PACKET(?CONNECT), State = #proto_state{connected = false}) ->
     process(Packet, State#proto_state{connected = true});
@@ -151,18 +153,14 @@ process(Packet = ?CONNECT_PACKET(Var), State0) ->
                     %% Generate clientId if null
                     State2 = maybe_set_clientid(State1),
 
-                    %% Start session
-                    case emqttd_sm:start_session(CleanSess, {clientid(State2), Username}) of
-                        {ok, Session, SP} ->
-                            %% Register the client
-                            emqttd_cm:reg(client(State2)),
-                            %% Start keepalive
-                            start_keepalive(KeepAlive),
-                            %% ACCEPT
-                            {?CONNACK_ACCEPT, SP, State2#proto_state{session = Session}};
-                        {error, Error} ->
-                            exit({shutdown, Error})
-                    end;
+                    %% Register the client
+                    emqttd_cm:reg(client(State2)),
+
+                    %% Start keepalive
+                    start_keepalive(KeepAlive),
+
+                    %% ACCEPT
+                    {?CONNACK_ACCEPT, false, State2};
                 {error, Reason}->
                     ?LOG(error, "Username '~s' login failed for ~p", [Username, Reason], State1),
                     {?CONNACK_CREDENTIALS, false, State1}
@@ -184,26 +182,21 @@ process(Packet = ?PUBLISH_PACKET(_Qos, Topic, _PacketId, _Payload), State) ->
     end,
     {ok, State};
 
-process(?PUBACK_PACKET(?PUBACK, PacketId), State = #proto_state{session = Session}) ->
-    emqttd_session:puback(Session, PacketId),
-    {ok, State};
-
-process(?PUBACK_PACKET(?PUBREC, PacketId), State = #proto_state{session = Session}) ->
-    emqttd_session:pubrec(Session, PacketId),
-    send(?PUBREL_PACKET(PacketId), State);
-
-process(?PUBACK_PACKET(?PUBREL, PacketId), State = #proto_state{session = Session}) ->
-    emqttd_session:pubrel(Session, PacketId),
-    send(?PUBACK_PACKET(?PUBCOMP, PacketId), State);
-
-process(?PUBACK_PACKET(?PUBCOMP, PacketId), State = #proto_state{session = Session})->
-    emqttd_session:pubcomp(Session, PacketId), {ok, State};
+process(?PUBACK_PACKET(?PUBACK, PktId), State = #proto_state{awaiting_ack = AwaitingAck}) ->
+    case maps:find(PktId, AwaitingAck) of
+        {ok, TRef} ->
+            cancel_timer(TRef),
+            acked(PktId, State);
+        error ->
+            ?LOG(warning, "Cannot find PUBACK: ~p", [PktId], State),
+            {ok, State}
+    end;
 
 %% Protect from empty topic table
 process(?SUBSCRIBE_PACKET(PacketId, []), State) ->
     send(?SUBACK_PACKET(PacketId, []), State);
 
-process(?SUBSCRIBE_PACKET(PacketId, TopicTable), State = #proto_state{session = Session}) ->
+process(?SUBSCRIBE_PACKET(PacketId, TopicTable), State) ->
     Client = client(State),
     AllowDenies = [check_acl(subscribe, Topic, Client) || {Topic, _Qos} <- TopicTable],
     case lists:member(deny, AllowDenies) of
@@ -211,16 +204,17 @@ process(?SUBSCRIBE_PACKET(PacketId, TopicTable), State = #proto_state{session = 
             ?LOG(error, "Cannot SUBSCRIBE ~p for ACL Deny", [TopicTable], State),
             send(?SUBACK_PACKET(PacketId, [16#80 || _ <- TopicTable]), State);
         false ->
-            emqttd_session:subscribe(Session, PacketId, TopicTable), {ok, State}
+            {ok, NewState} = handle({subscribe, TopicTable}, State),
+            send(?SUBACK_PACKET(PacketId, [degrade_qos(Qos) || {_, Qos} <- TopicTable]), NewState)
     end;
 
 %% Protect from empty topic list
 process(?UNSUBSCRIBE_PACKET(PacketId, []), State) ->
     send(?UNSUBACK_PACKET(PacketId), State);
 
-process(?UNSUBSCRIBE_PACKET(PacketId, Topics), State = #proto_state{session = Session}) ->
-    emqttd_session:unsubscribe(Session, Topics),
-    send(?UNSUBACK_PACKET(PacketId), State);
+process(?UNSUBSCRIBE_PACKET(PacketId, Topics), State) ->
+    {ok, NewState} = handle({unsubscribe, Topics}, State),
+    send(?UNSUBACK_PACKET(PacketId), NewState);
 
 process(?PACKET(?PINGREQ), State) ->
     send(?PACKET(?PINGRESP), State);
@@ -230,35 +224,133 @@ process(?PACKET(?DISCONNECT), State) ->
     {stop, normal, State#proto_state{will_msg = undefined}}.
 
 publish(Packet = ?PUBLISH_PACKET(?QOS_0, _PacketId),
-        #proto_state{client_id = ClientId, username = Username, session = Session}) ->
-    Msg = emqttd_message:from_packet(Username, ClientId, Packet),
-    emqttd_session:publish(Session, Msg);
+        #proto_state{client_id = ClientId, username = Username}) ->
+    emqttd:publish(emqttd_message:from_packet(Username, ClientId, Packet));
 
-publish(Packet = ?PUBLISH_PACKET(?QOS_1, _PacketId), State) ->
-    with_puback(?PUBACK, Packet, State);
+publish(Packet = ?PUBLISH_PACKET(?QOS_1, PacketId),
+        State = #proto_state{client_id = ClientId, username = Username}) ->
+    emqttd:publish(emqttd_message:from_packet(Username, ClientId, Packet)),
+    send(?PUBACK_PACKET(?PUBACK, PacketId), State).
 
-publish(Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), State) ->
-    with_puback(?PUBREC, Packet, State).
+%%Let it crash...
+%%publish(Packet = ?PUBLISH_PACKET(?QOS_2, _PacketId), State) ->
+%%    with_puback(?PUBREC, Packet, State).
 
-with_puback(Type, Packet = ?PUBLISH_PACKET(_Qos, PacketId),
-            State = #proto_state{client_id = ClientId,
-                                 username  = Username,
-                                 session   = Session}) ->
-    Msg = emqttd_message:from_packet(Username, ClientId, Packet),
-    case emqttd_session:publish(Session, Msg) of
-        ok ->
-            send(?PUBACK_PACKET(Type, PacketId), State);
-        {error, Error} ->
-            ?LOG(error, "PUBLISH ~p error: ~p", [PacketId, Error], State)
+handle({subscribe, RawTopicTable}, State = #proto_state{client_id = ClientId,
+                                                        username = Username,
+                                                        subscriptions = Subscriptions}) ->
+    ?LOG(info, "Subscribe ~p", [RawTopicTable], State),
+    ParsedTopicTable = lists:map(fun({RawTopic, Qos}) ->
+                {Topic, Opts} = emqttd_topic:parse(RawTopic),
+                {Topic, [{qos, Qos} | Opts]}
+        end, RawTopicTable),
+    {ok, TopicTable} = emqttd:run_hooks('client.subscribe', [{ClientId, Username}], ParsedTopicTable),
+    Subscriptions1 = lists:foldl(fun({Topic, Opts}, SubMap) ->
+                Qos = degrade_qos(proplists:get_value(qos, Opts)),
+                case maps:find(Topic, SubMap) of
+                    {ok, Qos} ->
+                        ?LOG(warning, "duplicated subscribe: ~s, qos = ~w", [Topic, Qos], State),
+                        SubMap;
+                    {ok, OldQos} ->
+                        ?LOG(warning, "duplicated subscribe ~s, old_qos=~w, new_qos=~w", [Topic, OldQos, Qos], State),
+                        emqttd:setqos(Topic, ClientId, Qos),
+                        maps:put(Topic, Qos, SubMap);
+                    error ->
+                        emqttd:subscribe(Topic, ClientId, Opts),
+                        emqttd:run_hooks('client.subscribed', [{ClientId, Username}], {Topic, Opts}),
+                        maps:put(Topic, Qos, SubMap)
+                end
+        end, Subscriptions, TopicTable),
+    {ok, State#proto_state{subscriptions = Subscriptions1}};
+
+handle({unsubscribe, RawTopics}, State = #proto_state{client_id = ClientId,
+                                                      username = Username,
+                                                      subscriptions = Subscriptions}) ->
+    ?LOG(info, "unsubscribe ~p", [RawTopics], State),
+    ParsedTopics = [emqttd_topic:parse(Topic) || Topic <- RawTopics],
+    {ok, Topics} = emqttd:run_hooks('client.unsubscribe', [{ClientId, Username}], ParsedTopics),
+    Subscriptions1 = lists:foldl(fun({Topic, _Opts}, SubMap) ->
+                case maps:find(Topic, SubMap) of
+                    {ok, _Qos} ->
+                        emqttd:unsubscribe(Topic, ClientId),
+                        maps:remove(Topic, SubMap);
+                    error ->
+                        SubMap
+                end
+        end, Subscriptions, Topics),
+    {ok, State#proto_state{subscriptions = Subscriptions1}}.
+
+timeout({awaiting_ack, PacketId}, State = #proto_state{inflight = InflightQ,
+                                                       awaiting_ack = AwaitingAck}) ->
+
+    case maps:find(PacketId, AwaitingAck) of
+        {ok, _TRef} ->
+            case lists:keyfind(PacketId, 1, InflightQ) of
+                {_, Msg} ->
+                    redeliver(Msg, State);
+                false ->
+                    ?LOG(error, "AwaitingAck timeout but Cannot find PktId: ~p", [PacketId], State),
+                    {ok, State}
+                end;
+        error ->
+            ?LOG(error, "Cannot find AwaitingAck: ~p", [PacketId], State),
+            {ok, State}
     end.
 
-handle({subscribe, TopicTable}, State) ->
-    %%TODO:
-    {ok, State};
+%%--------------------------------------------------------------------
+%% Deliver Messages
+%%--------------------------------------------------------------------
 
-handle({unsubscribe, Topics}, State) ->
-    %%TODO:
-    {ok, State}.
+deliver(Topic, Msg = #mqtt_message{qos = Qos}, State = #proto_state{subscriptions = Subscriptions}) ->
+    deliver(tune_qos(Topic, Msg#mqtt_message{qos = degrade_qos(Qos)}, Subscriptions), State).
+
+deliver(Msg = #mqtt_message{qos = ?QOS0}, State) ->
+    send(Msg, State);
+
+deliver(Msg = #mqtt_message{qos = ?QOS1}, State = #proto_state{inflight = InflightQ,
+                                                               packet_id = PktId}) ->
+    send(Msg1 = Msg#mqtt_message{pktid = PktId, dup = false}, State),
+    await(Msg1, next_packet_id(State#proto_state{inflight = [{PktId, Msg1}|InflightQ]})).
+
+redeliver(Msg = #mqtt_message{qos = ?QOS_1}, State) ->
+    send(Msg1 = Msg#mqtt_message{dup = true}, State),
+    await(Msg1, State).
+
+%%--------------------------------------------------------------------
+%% Awaiting PubAck for Qos1 Message
+%%--------------------------------------------------------------------
+await(#mqtt_message{pktid = PktId}, State = #proto_state{
+        awaiting_ack = Awaiting, retry_interval = Timeout}) ->
+    TRef = timer(Timeout, {timeout, awaiting_ack, PktId}),
+    Awaiting1 = maps:put(PktId, TRef, Awaiting),
+    {ok, State#proto_state{awaiting_ack = Awaiting1}}.
+
+acked(PktId, State = #proto_state{client_id    = ClientId,
+                                  username     = Username,
+                                  inflight     = InflightQ,
+                                  awaiting_ack = Awaiting}) ->
+    case lists:keyfind(PktId, 1, InflightQ) of
+        {_, Msg} ->
+            emqttd:run_hooks('message.acked', [{ClientId, Username}], Msg);
+        false ->
+            ?LOG(error, "Cannot find acked pktid: ~p", [PktId], State)
+    end,
+    {ok, State#proto_state{awaiting_ack = maps:remove(PktId, Awaiting),
+                           inflight     = lists:keydelete(PktId, 1, InflightQ)}}.
+
+next_packet_id(State = #proto_state{packet_id = 16#ffff}) ->
+    State#proto_state{packet_id = 1};
+
+next_packet_id(State = #proto_state{packet_id = Id}) ->
+    State#proto_state{packet_id = Id + 1}.
+
+timer(TimeoutSec, TimeoutMsg) ->
+    erlang:send_after(timer:seconds(TimeoutSec), self(), TimeoutMsg).
+
+cancel_timer(undefined) -> 
+    undefined;
+cancel_timer(Ref) -> 
+    catch erlang:cancel_timer(Ref).
 
 -spec(send(mqtt_message() | mqtt_packet(), proto_state()) -> {ok, proto_state()}).
 send(Msg, State = #proto_state{client_id = ClientId, username = Username})
@@ -278,10 +370,6 @@ trace(recv, Packet, ProtoState) ->
 
 trace(send, Packet, ProtoState) ->
     ?LOG(info, "SEND ~s", [emqttd_packet:format(Packet)], ProtoState).
-
-%% @doc redeliver PUBREL PacketId
-redeliver({?PUBREL, PacketId}, State) ->
-    send(?PUBREL_PACKET(PacketId), State).
 
 shutdown(_Error, #proto_state{client_id = undefined}) ->
     ignore;
@@ -427,3 +515,15 @@ check_acl(subscribe, Topic, Client) ->
 sp(true)  -> 1;
 sp(false) -> 0.
 
+degrade_qos(?QOS_2) -> ?QOS_1;
+degrade_qos(Qos)    -> Qos.
+
+tune_qos(Topic, Msg = #mqtt_message{qos = PubQos}, Subscriptions) ->
+    case maps:find(Topic, Subscriptions) of
+        {ok, SubQos} when PubQos > SubQos ->
+            Msg#mqtt_message{qos = SubQos};
+        {ok, _SubQos} ->
+            Msg;
+        error ->
+            Msg
+    end.
