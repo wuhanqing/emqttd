@@ -2,7 +2,7 @@
 EMQ for Game
 ============
 
-Game Server based on EMQ 2.0
+Game Gateway based on EMQ 2.0
 
 ## Author
 
