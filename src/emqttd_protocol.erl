@@ -40,10 +40,11 @@
                       %% Last packet id of the session
                       packet_id = 1,
                       %% Client’s subscriptions.
-                      subscriptions :: map(),
+                      subscriptions = #{},
+                      %% Inflight Queue
                       inflight = [],
                       %% Client’s subscriptions.
-                      awaiting_ack :: map(),
+                      awaiting_ack = #{},
                       %% Retry interval for redelivering QoS1 messages
                       retry_interval = 30,
                       %% Headers from first HTTP request for websocket client
