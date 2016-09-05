@@ -258,6 +258,7 @@ handle({subscribe, RawTopicTable}, State = #proto_state{client_id = ClientId,
                         maps:put(Topic, Qos, SubMap);
                     error ->
                         emqttd:subscribe(Topic, ClientId, Opts),
+                        emqttd_retainer:dispatch(Topic, self()),
                         emqttd:run_hooks('client.subscribed', [{ClientId, Username}], {Topic, Opts}),
                         maps:put(Topic, Qos, SubMap)
                 end
