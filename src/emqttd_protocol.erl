@@ -26,21 +26,30 @@
 -import(proplists, [get_value/2, get_value/3]).
 
 %% API
--export([init/3, info/1, clientid/1, client/1, session/1]).
+-export([init/3, info/1, clientid/1, client/1]).
 
--export([received/2, send/2, redeliver/2, shutdown/2]).
+-export([received/2, handle/2, send/2, redeliver/2, shutdown/2]).
 
 -export([process/2]).
+ 
+-record(session_state, {packet_id  = 1, %% Last packet id of the session
+                        %% Client’s subscriptions.
+                        subscriptions :: map(),
+                        %% Awaiting timers for ack, rel.
+                        awaiting_ack  :: map(),
+                        %% Retry interval for redelivering QoS1 messages
+                        retry_interval = 30}).
 
 %% Protocol State
 -record(proto_state, {peername, sendfun, connected = false,
                       client_id, client_pid, clean_sess,
                       proto_ver, proto_name, username,
                       will_msg, keepalive, max_clientid_len = ?MAX_CLIENTID_LEN,
-                      session, ws_initial_headers, %% Headers from first HTTP request for websocket client
+                      session :: #session_state{},
+                      ws_initial_headers, %% Headers from first HTTP request for websocket client
                       connected_at}).
 
--type proto_state() :: #proto_state{}.
+-type(proto_state() :: #proto_state{}).
 
 -define(INFO_KEYS, [client_id, username, clean_sess, proto_ver, proto_name,
                     keepalive, will_msg, ws_initial_headers, connected_at]).
@@ -89,9 +98,6 @@ client(#proto_state{client_id          = ClientId,
                  will_topic         = WillTopic,
                  ws_initial_headers = WsInitialHeaders,
                  connected_at       = Time}.
-
-session(#proto_state{session = Session}) ->
-    Session.
 
 %% CONNECT – Client requests a connection to a Server
 
@@ -245,6 +251,14 @@ with_puback(Type, Packet = ?PUBLISH_PACKET(_Qos, PacketId),
         {error, Error} ->
             ?LOG(error, "PUBLISH ~p error: ~p", [PacketId, Error], State)
     end.
+
+handle({subscribe, TopicTable}, State) ->
+    %%TODO:
+    {ok, State};
+
+handle({unsubscribe, Topics}, State) ->
+    %%TODO:
+    {ok, State}.
 
 -spec(send(mqtt_message() | mqtt_packet(), proto_state()) -> {ok, proto_state()}).
 send(Msg, State = #proto_state{client_id = ClientId, username = Username})

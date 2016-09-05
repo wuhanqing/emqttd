@@ -26,8 +26,7 @@
 -include("emqttd_internal.hrl").
 
 %% API Function Exports
--export([start_link/2, session/1, info/1, kick/1,
-         set_rate_limit/2, get_rate_limit/1]).
+-export([start_link/2, info/1, kick/1, set_rate_limit/2, get_rate_limit/1]).
 
 %% SUB/UNSUB Asynchronously. Called by plugins.
 -export([subscribe/2, unsubscribe/2]).
@@ -50,9 +49,6 @@
 
 start_link(Connection, MqttEnv) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [[Connection, MqttEnv]])}.
-
-session(CPid) ->
-    gen_server:call(CPid, session, infinity).
 
 info(CPid) ->
     gen_server:call(CPid, info, infinity).
@@ -116,9 +112,6 @@ init([OriginConn, MqttEnv]) ->
     IdleTimout = proplists:get_value(client_idle_timeout, MqttEnv, 30),
     gen_server:enter_loop(?MODULE, [], State, timer:seconds(IdleTimout)).
 
-handle_call(session, _From, State = #client_state{proto_state = ProtoState}) -> 
-    {reply, emqttd_protocol:session(ProtoState), State};
-
 handle_call(info, _From, State = #client_state{connection  = Connection,
                                                proto_state = ProtoState}) ->
     ClientInfo = ?record_to_proplist(client_state, State, ?INFO_KEYS),
@@ -140,14 +133,14 @@ handle_call(Req, _From, State) ->
     ?UNEXPECTED_REQ(Req, State).
 
 handle_cast({subscribe, TopicTable}, State) ->
-    with_session(fun(SessPid) ->
-                   emqttd_session:subscribe(SessPid, TopicTable)
-                 end, State);
-
+    with_proto_state(fun(ProtoState) ->
+                emqttd_protocol:handle({subscribe, TopicTable}, ProtoState)
+        end, State);
+    
 handle_cast({unsubscribe, Topics}, State) ->
-    with_session(fun(SessPid) ->
-                   emqttd_session:unsubscribe(SessPid, Topics)
-                 end, State);
+    with_proto_state(fun(ProtoState) ->
+                emqttd_protocol:handle({unsubscribe, Topics}, ProtoState)
+        end, State);
 
 handle_cast(Msg, State) ->
     ?UNEXPECTED_MSG(Msg, State).
@@ -248,10 +241,6 @@ code_change(_OldVsn, State, _Extra) ->
 with_proto_state(Fun, State = #client_state{proto_state = ProtoState}) ->
     {ok, ProtoState1} = Fun(ProtoState),
     hibernate(State#client_state{proto_state = ProtoState1}).
-
-with_session(Fun, State = #client_state{proto_state = ProtoState}) ->
-    Fun(emqttd_protocol:session(ProtoState)),
-    hibernate(State).
 
 %% Receive and parse tcp data
 received(<<>>, State) ->

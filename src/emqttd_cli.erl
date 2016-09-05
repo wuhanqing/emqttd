@@ -28,7 +28,7 @@
 
 -export([load/0]).
 
--export([status/1, broker/1, cluster/1, users/1, clients/1, sessions/1,
+-export([status/1, broker/1, cluster/1, users/1, clients/1,
          routes/1, topics/1, subscriptions/1, plugins/1, bridges/1,
          listeners/1, vm/1, mnesia/1, trace/1]).
 
@@ -166,31 +166,6 @@ if_client(ClientId, Fun) ->
         undefined -> ?PRINT_MSG("Not Found.~n");
         Client    -> Fun(Client)
     end.
-
-%%--------------------------------------------------------------------
-%% @doc Sessions Command
-sessions(["list"]) ->
-    dump(mqtt_local_session);
-
-%% performance issue?
-sessions(["list", "persistent"]) ->
-    lists:foreach(fun print/1, ets:match_object(mqtt_local_session, {'_', false, '_', '_'}));
-
-%% performance issue?
-sessions(["list", "transient"]) ->
-    lists:foreach(fun print/1, ets:match_object(mqtt_local_session, {'_', true, '_', '_'}));
-
-sessions(["show", ClientId]) ->
-    case ets:lookup(mqtt_local_session, bin(ClientId)) of
-        []         -> ?PRINT_MSG("Not Found.~n");
-        [SessInfo] -> print(SessInfo)
-    end;
-
-sessions(_) ->
-    ?USAGE([{"sessions list",            "List all sessions"},
-            {"sessions list persistent", "List all persistent sessions"},
-            {"sessions list transient",  "List all transient sessions"},
-            {"sessions show <ClientId>", "Show a session"}]).
 
 %%--------------------------------------------------------------------
 %% @doc Routes Command
