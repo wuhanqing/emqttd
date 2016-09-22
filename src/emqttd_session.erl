@@ -234,7 +234,8 @@ init([CleanSess, ClientId, ClientPid]) ->
             collect_interval  = get_value(collect_interval, SessEnv, 0),
             timestamp         = os:timestamp()},
     emqttd_sm:register_session(CleanSess, ClientId, sess_info(Session)),
-    %% start statistics
+    emqttd:run_hooks('session.created', [ClientId], []),
+    %% Start Statistics
     {ok, start_collector(Session), hibernate}.
 
 prioritise_call(Msg, _From, _Len, _State) ->
@@ -533,6 +534,7 @@ handle_info(Info, Session) ->
     ?UNEXPECTED_INFO(Info, Session).
 
 terminate(_Reason, #session{clean_sess = CleanSess, client_id = ClientId}) ->
+    emqttd:run_hooks('session.destroyed', [ClientId], []),
     emqttd_sm:unregister_session(CleanSess, ClientId).
 
 code_change(_OldVsn, Session, _Extra) ->
