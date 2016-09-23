@@ -246,7 +246,7 @@ init([CleanSess, ClientId, ClientPid]) ->
             timestamp         = os:timestamp()},
     emqttd_sm:register_session(CleanSess, ClientId, sess_info(Session)),
     %% Run hooks
-    emqttd:run_hooks('session.created', [ClientId, ClientPid], []),
+    emqttd:run_hooks('session.created', [ClientId, self()], []),
     %% Start collector
     {ok, start_collector(Session), hibernate}.
 
